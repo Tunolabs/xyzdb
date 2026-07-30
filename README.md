@@ -86,6 +86,15 @@ cargo build --release -p xyzdb-mcp
 
 Two modes: `--embed <PATH>` (canonical single-process subprocess pattern) and `--connect <HOST:PORT>` (TCP client of an existing `xyzdb-server`, canonical for a multi-process deployment). Privacy-clean by default — statement text never appears in logs, only an xxh3-64 fingerprint plus first verb. A `--log-statements` development flag adds full TRACE logging behind a cross-actor leak guard that refuses non-loopback `--connect` targets.
 
+Prefer not to build from source? A prebuilt image ships `xyzdb-mcp` and is listed on the [MCP registry](https://registry.modelcontextprotocol.io) as `io.github.Tunolabs/xyzdb`:
+
+```bash
+docker run -i --rm -v /abs/path/to/your/data:/data \
+  ghcr.io/tunolabs/xyzdb-mcp:1.0.1 --embed /data
+```
+
+Run with `-i` (stdio transport); see the [Docker section](docs/mcp-integration.md#docker-image) for `--connect` and MCP-client config.
+
 Full reference: [`docs/mcp-integration.md`](docs/mcp-integration.md). Templates and an annotated wire transcript: [`examples/mcp/`](examples/mcp/).
 
 ---

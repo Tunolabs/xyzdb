@@ -60,6 +60,85 @@ The startup probe issues a single `STATS` query to verify reachability. Pass `--
 
 `xyzdb-mcp` warns at startup when `--connect` targets a non-private IP — see [Privacy & telemetry](#privacy--telemetry) below for the full guard list.
 
+## Docker image
+
+A prebuilt image ships the `xyzdb-mcp` binary, so you can run the MCP server
+without a Rust toolchain. It is published to the GitHub Container Registry and
+listed on the official MCP registry under the name
+`io.github.Tunolabs/xyzdb`.
+
+```
+ghcr.io/tunolabs/xyzdb-mcp:1.0.1
+```
+
+The image is Business Source License 1.1, same as the engine — see
+[`LICENSE`](../LICENSE).
+
+The MCP transport is **JSON-RPC 2.0 over stdio**, so the container must run
+with an open, attached stdin: `docker run -i` (no `-t`, no `-d`). All logs go
+to stderr; stdout carries only MCP framing. There is no default command — pass
+`--embed <PATH>` or `--connect <HOST:PORT>` at run time.
+
+### Docker — `--embed`
+
+Bind-mount your data directory to `/data` and open it in embedded mode:
+
+```bash
+docker run -i --rm -v /absolute/path/to/your/data/dir:/data \
+  ghcr.io/tunolabs/xyzdb-mcp:1.0.1 --embed /data
+```
+
+MCP client config:
+
+```json
+{
+  "mcpServers": {
+    "xyzdb": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-v", "/absolute/path/to/your/data/dir:/data",
+        "ghcr.io/tunolabs/xyzdb-mcp:1.0.1",
+        "--embed", "/data"
+      ]
+    }
+  }
+}
+```
+
+### Docker — `--connect`
+
+Forward to an external `xyzdb-server`. When the server was started with
+`--auth-token`, pass the bearer token through `XYZDB_TOKEN` (the driver sends
+it as the auth preamble; a non-loopback bind always enforces auth):
+
+```bash
+docker run -i --rm -e XYZDB_TOKEN="$XYZDB_TOKEN" \
+  ghcr.io/tunolabs/xyzdb-mcp:1.0.1 --connect host.docker.internal:2505
+```
+
+MCP client config (the empty-valued `-e XYZDB_TOKEN` passes the variable
+through from the client's environment):
+
+```json
+{
+  "mcpServers": {
+    "xyzdb": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-e", "XYZDB_TOKEN",
+        "ghcr.io/tunolabs/xyzdb-mcp:1.0.1",
+        "--connect", "host.docker.internal:2505"
+      ]
+    }
+  }
+}
+```
+
+`host.docker.internal` reaches a server on the Docker host; use the service
+name when the server runs as a container on the same Docker network.
+
 ## Tools reference
 
 All five tools return JSON in the MCP standard `CallToolResult.content[0].text` slot. Schemas are advertised via `tools/list`.
