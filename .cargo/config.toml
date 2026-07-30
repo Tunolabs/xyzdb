@@ -14,9 +14,13 @@
 # Bit-identity: widening `wide::f32x8` from 2×SSE2 to a 256-bit VMULPS/VADDPS is
 # the SAME math per lane, SAME accumulation order — the kernel has no
 # `mul_add`/FMA, so v2 (SSE2 baseline) and v3 (AVX2) must produce BYTE-IDENTICAL
-# scores. That equality is the v2==v3 bit gate, and it is verifiable ONLY on x86
-# (ARM has nothing to widen). Until that gate
-# is green on x86, v3 carries a hard "guarantee unverified" mark, not merely
-# "unmeasured".
+# scores. That equality is the v2==v3 bit gate, verifiable ONLY on x86 (ARM has
+# nothing to widen). It is VERIFIED GREEN in CI on x86: the `bit-identity` job in
+# `.github/workflows/ci.yml` runs `crates/core/tests/score_bit_identity.rs` under
+# both `target-cpu=x86-64` (SSE2 baseline) and `target-cpu=x86-64-v3` (AVX2) and
+# fails the build if the score fingerprints differ. Anyone can reproduce it with
+# those two RUSTFLAGS. v3 therefore carries NO "guarantee unverified" mark: the
+# byte-identity of the scores across ISAs is a checked invariant, not an
+# unmeasured claim.
 [target.x86_64-unknown-linux-gnu]
 rustflags = ["-C", "target-cpu=x86-64-v3"]
