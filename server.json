@@ -1,0 +1,87 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.Tunolabs/xyzdb",
+  "title": "xyzDB",
+  "description": "MCP server for xyzDB: run xyTalk queries, inspect lobes and stats, take hot snapshots.",
+  "websiteUrl": "https://github.com/Tunolabs/xyzdb/blob/main/docs/mcp-integration.md",
+  "repository": {
+    "url": "https://github.com/Tunolabs/xyzdb",
+    "source": "github"
+  },
+  "version": "1.0.1",
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/tunolabs/xyzdb-mcp:1.0.1",
+      "runtimeHint": "docker",
+      "transport": {
+        "type": "stdio"
+      },
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "-v",
+          "value": "{data_dir}:/data",
+          "isRequired": true,
+          "format": "string",
+          "description": "Embed mode: bind-mount your xyzDB data directory to /data inside the container. The MCP server opens it directly (holds the LSM lock), so no separate xyzdb-server may run against the same dir.",
+          "variables": {
+            "data_dir": {
+              "description": "Absolute host path to the xyzDB data directory.",
+              "isRequired": true,
+              "format": "string"
+            }
+          }
+        }
+      ],
+      "packageArguments": [
+        {
+          "type": "named",
+          "name": "--embed",
+          "value": "/data",
+          "description": "Open the data directory mounted at /data in embedded mode."
+        }
+      ]
+    },
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/tunolabs/xyzdb-mcp:1.0.1",
+      "runtimeHint": "docker",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "named",
+          "name": "--connect",
+          "value": "{host}:{port}",
+          "isRequired": true,
+          "format": "string",
+          "description": "Connect mode: forward queries over TCP to an external xyzdb-server already serving the data dir.",
+          "variables": {
+            "host": {
+              "description": "Hostname or IP of the running xyzdb-server.",
+              "isRequired": true,
+              "format": "string"
+            },
+            "port": {
+              "description": "TCP port of the xyzdb-server (default 2505).",
+              "isRequired": true,
+              "format": "string",
+              "default": "2505"
+            }
+          }
+        }
+      ],
+      "environmentVariables": [
+        {
+          "name": "XYZDB_TOKEN",
+          "description": "Bearer token for a xyzdb-server started with --auth-token. Required when the server enforces authentication (any non-loopback bind does).",
+          "isSecret": true,
+          "isRequired": false,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

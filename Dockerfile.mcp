@@ -1,0 +1,91 @@
+# syntax=docker/dockerfile:1
+#
+# Dockerfile.mcp — OCI image for the xyzDB MCP server (`xyzdb-mcp`).
+#
+# This is a SEPARATE image from the engine `Dockerfile` (which ships
+# `xyzdb-server` and listens on TCP :2505). `xyzdb-mcp` speaks JSON-RPC 2.0
+# over **stdio**, so this image is meant to be run as:
+#
+#   docker run -i --rm ghcr.io/tunolabs/xyzdb-mcp:1.0.1 --embed /data
+#   docker run -i --rm ghcr.io/tunolabs/xyzdb-mcp:1.0.1 --connect host:2505
+#
+# The `-i` (interactive, stdin kept open) is REQUIRED: the MCP client drives
+# the process over stdin/stdout. The container must not daemonize and must not
+# write anything to stdout except MCP framing — `xyzdb-mcp` sends all logs to
+# stderr (`tracing` subscriber + `eprintln!`), so the stdout channel stays
+# clean for the protocol.
+
+# Pin builder to bookworm so glibc matches the distroless/cc-debian12 runtime
+# below (debian12 == bookworm). Same rationale as the engine Dockerfile:
+# `rust:slim` rolled bookworm -> trixie in 2026-Q2 (glibc 2.36 -> 2.38), which
+# broke the runtime with "GLIBC_2.38 not found".
+FROM rust:slim-bookworm AS builder
+# Provided automatically by buildx (linux/amd64 -> amd64, linux/arm64 -> arm64).
+ARG TARGETARCH
+# Image variant recorded for parity with the engine image. Not bench-relevant
+# for the MCP server (it wraps SHOW/snapshot/query calls, off any hot path),
+# but kept so both images carry the same provenance label.
+ARG XYZ_IMAGE_VARIANT=""
+# build-essential + pkg-config cover the C-compiling -sys crates (jemalloc,
+# zstd, aws-lc, ring). No libssl-dev: TLS is rustls/ring, self-contained.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential pkg-config ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /build
+# Single-workspace layout (0.9): the whole workspace builds from the root.
+# .cargo/config.toml carries target-cpu=x86-64-v3 for the x86_64-linux build;
+# it is target-scoped so it applies to amd64 and is inert on arm64.
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY .cargo/ .cargo/
+COPY crates/ crates/
+COPY tools/ tools/
+# Same AVX2-baseline guard as the engine image: fail loudly if the x86-v3 flag
+# is ever silently dropped from the build context for the amd64 build.
+RUN if [ "$TARGETARCH" = "amd64" ]; then \
+      grep -q 'target-cpu=x86-64-v3' .cargo/config.toml \
+        || { echo 'ERROR: target-cpu=x86-64-v3 missing from .cargo/config.toml for amd64 build'; exit 1; }; \
+      echo "xyzdb-mcp image: amd64 / x86-v3 — target-cpu=x86-64-v3 (AVX2) applies"; \
+    else \
+      echo "xyzdb-mcp image: ${TARGETARCH} — x86-v3 flag inert (arm baseline)"; \
+    fi
+# Match the tagged release artifact: fat LTO + single codegen unit. Only the
+# `xyzdb-mcp` binary is built here (the engine image builds `xyzdb-server`).
+RUN CARGO_PROFILE_RELEASE_LTO=fat CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
+    cargo build --release -p xyzdb-mcp
+
+# Runtime: distroless/cc-debian12 (glibc 2.36 + libgcc + libstdc++, ~34 MB).
+# The binary links only glibc/libgcc/libm (TLS is rustls, no openssl). No shell
+# or package manager in the runtime; for debugging attach a debian-slim sidecar.
+FROM gcr.io/distroless/cc-debian12
+ARG XYZ_IMAGE_VARIANT=""
+
+# ── Ownership verification for the MCP registry ────────────────────────────
+# EXACT label required by the registry's OCI validator. Its value MUST be
+# byte-for-byte identical to the `name` field in server.json, or `publish`
+# is rejected. Do not edit one without the other.
+LABEL io.modelcontextprotocol.server.name="io.github.Tunolabs/xyzdb"
+
+# Provenance parity with the engine image.
+LABEL org.xyzdb.image-variant="${XYZ_IMAGE_VARIANT}"
+
+# ── OCI standard metadata (shown on the container registry listing) ─────────
+# The image is Business Source License 1.1, same as the engine. This does not
+# change any licensing; the registry description states it and links LICENSE.
+LABEL org.opencontainers.image.title="xyzdb-mcp"
+LABEL org.opencontainers.image.description="MCP server for xyzDB — JSON-RPC 2.0 over stdio, --embed or --connect. Business Source License 1.1 (BUSL-1.1): see https://github.com/Tunolabs/xyzdb/blob/main/LICENSE"
+LABEL org.opencontainers.image.licenses="BUSL-1.1"
+LABEL org.opencontainers.image.source="https://github.com/Tunolabs/xyzdb"
+LABEL org.opencontainers.image.url="https://github.com/Tunolabs/xyzdb"
+LABEL org.opencontainers.image.documentation="https://github.com/Tunolabs/xyzdb/blob/main/docs/mcp-integration.md"
+
+COPY --from=builder /build/target/release/xyzdb-mcp /usr/local/bin/
+
+# Hint for --embed mode: mount the data dir here and pass `--embed /data`.
+# The actual path is caller-chosen; nothing is written unless --embed is used.
+VOLUME /data
+
+# stdio transport: no port, no daemon. The caller MUST pass a mode
+# (`--embed <PATH>` or `--connect <HOST:PORT>`); with neither, the binary
+# exits with a clear error (clap ArgGroup, required). No default CMD on
+# purpose — the runner decides the mode.
+ENTRYPOINT ["xyzdb-mcp"]
