@@ -1,0 +1,31 @@
+xyzDB
+Copyright (c) 2026 Iván Moreno Mendoza
+
+This product is licensed under the Business Source License 1.1 (BUSL-1.1).
+See the LICENSE file for the full terms.
+
+"Business Source License" is a trademark of MariaDB Corporation Ab.
+The license text is copyright (c) 2017 MariaDB Corporation Ab.
+
+The Business Source License applies separately to each version of xyzDB, and
+each version carries its own Change Date. xyzDB 1.0 converts to the Apache
+License, Version 2.0 on 2029-08-01. See docs/license-change-dates.md for the
+full schedule.
+
+Everything in this repository is covered by the Business Source License,
+including the minimal reference client under examples/. The permissively
+licensed client packages (Apache-2.0) are published separately to crates.io,
+PyPI, and npm as `xyzdb`.
+
+PROTOCOL.md specifies the xyzDB wire protocol. That specification may be
+implemented freely, by anyone, under any license. Implementing the protocol or
+interoperating with an xyzDB server does not require a commercial license.
+
+PERMISSIONS.md records any additional permissions the Licensor has published
+that broaden the Additional Use Grant. Once published, they are not withdrawn.
+
+xyzDB is a trademark of Tuno Labs; the xyzDB source code remains copyright Iván
+Moreno Mendoza. See TRADEMARKS.md.
+
+Commercial licenses for xyzDB are available from the Licensor:
+licensing@tuno.bar

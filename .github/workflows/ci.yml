@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    name: workspace check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # The toolchain (channel + rustfmt/clippy) is pinned by
+      # rust-toolchain.toml. `rustup show` installs exactly that, rather than
+      # defaulting to a floating `stable`.
+      - name: Install pinned toolchain
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      # Deliberately no `-D warnings`: production code carries a known set of
+      # unwrap/expect warnings (tracked as post-launch debt) and zero errors.
+      # `-D warnings` would make the repo start red; we require a clean exit 0.
+      - name: Clippy
+        run: cargo clippy --workspace
+
+      - name: Build
+        run: cargo build --workspace
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Durability tests
+        run: cargo test -p turba-engine --features durability-test-hooks
+
+      - name: License / version parity
+        run: bash .ci/license-version-parity.sh
+
+      - name: Profile parity
+        run: bash .ci/profile-parity.sh

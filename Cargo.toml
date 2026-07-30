@@ -1,0 +1,79 @@
+[workspace]
+resolver = "2"
+members = ["crates/*", "tools/*"]
+# benchmarks/native is its own [workspace]; deliberately not captured here so the
+# rival DB clients (mongo/postgres/surreal) stay out of the engine's Cargo.lock.
+# tools/validation is excluded on purpose: parity with the previous layout and to
+# keep its server-driving scenario runners out of `cargo test --workspace`. As a
+# non-member it does NOT inherit the release profile — acceptable because it is a
+# scenario runner, not a measurement path.
+exclude = ["tools/validation", "benchmarks"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.85"
+version = "1.0.0"
+authors = ["Iván Moreno Mendoza <ivan@tuno.bar>"]
+license = "BUSL-1.1"
+repository = "https://github.com/Tunolabs/xyzdb"
+
+[workspace.dependencies]
+# Serialization
+serde = { version = "1", features = ["derive"] }
+bincode = "1"                                          # Legacy: fallback read only
+postcard = { version = "1", features = ["alloc"] }     # V5+: primary serialization
+serde_json = "1"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Testing
+tempfile = "3"
+
+# Other
+rand = "0.10"
+
+# SIMD (stable, portable f32x8 — x86 + ARM from one kernel, zero new unsafe)
+wide = "1.5"
+# Safe zero-copy &[u8] -> &[f32] reinterpret for the V5 vector column (with an
+# alignment-checked fallback); no unsafe, satisfies undocumented_unsafe_blocks.
+bytemuck = "1"
+
+[profile.release]
+opt-level = 3
+# Fat LTO + single codegen unit are REQUIRED for production: the thin/default
+# profile leaves a codegen-differential overhead (~60% slower Q8MonthlyClose
+# under mixed workload) from std/flume inlining decisions surfacing as
+# OnceBox::initialize / pthread_mutex_init / elevated flume::recv_timeout. Fat
+# LTO eliminates the differential (not algorithmic). This was the original G1
+# Q8 halt, confirmed across four canonical runs.
+lto = "fat"
+codegen-units = 1
+
+# Profiling image only (M1 flamegraph runbook). The
+# real optimized binary — inherits every release setting (opt-level 3, fat LTO,
+# cu=1, target-cpu=x86-64-v3) — plus full DWARF so perf can attribute compute vs
+# read-path. NOT a debug build; NOT shipped (release stays stripped). Build with
+# `cargo build --profile profiling`.
+[profile.profiling]
+inherits = "release"
+debug = 2
+strip = false
+
+[workspace.lints.clippy]
+undocumented_unsafe_blocks = "deny"
+missing_safety_doc = "deny"
+# Cosmetic doc-comment formatting lints are not enforced (open-repo docs style).
+doc_lazy_continuation = "allow"
+doc_overindented_list_items = "allow"

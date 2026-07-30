@@ -1,0 +1,54 @@
+{
+  "version": "v0.3.4",
+  "seed": 42,
+  "scale": 1.0,
+  "reference_now": "2026-07-08T23:00:16.597679+00:00",
+  "tolerance_f64_relative": 1e-6,
+  "caveats_active": [],
+  "verify_queries": {
+    "v1_credits_total": {
+      "n": 3000000,
+      "sum": 301476735964.68506
+    },
+    "v2_installments_overdue": {
+      "n": 11249262,
+      "sum": 57364308486.51605
+    },
+    "v3_payments_total": {
+      "n": 36000000,
+      "sum": 1126705511727.1611
+    },
+    "v4_lobe_type_counts": {
+      "clientes": {
+        "_total": 1500000
+      },
+      "creditos": {
+        "Collection": 900000,
+        "CollectionAction": 2700000,
+        "Credit": 3000000,
+        "Installment": 75000000,
+        "Payment": 36000000
+      },
+      "operaciones": {
+        "AuditLog": 15000000,
+        "CreditApplication": 3750000,
+        "Notification": 12000000
+      },
+      "configuracion": {
+        "Empresa": 80,
+        "Producto": 350
+      },
+      "bi": {
+        "_total": 84000
+      }
+    },
+    "v5_clients_distinct_rfc": {
+      "n": 1500000
+    },
+    "v6_config_counts": {
+      "empresas": 80,
+      "productos": 350,
+      "_total": 430
+    }
+  }
+}

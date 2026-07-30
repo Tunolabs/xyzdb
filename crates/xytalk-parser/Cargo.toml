@@ -1,0 +1,14 @@
+[package]
+name = "xytalk-parser"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+xyzdb-core = { path = "../core" }
+nom = "7"
+
+[lints]
+workspace = true

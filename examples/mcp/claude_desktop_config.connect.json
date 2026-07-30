@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "xyzdb": {
+      "command": "/REPLACE/WITH/ABSOLUTE/PATH/TO/xyzdb/target/release/xyzdb-mcp",
+      "args": [
+        "--connect",
+        "127.0.0.1:2505"
+      ]
+    }
+  }
+}

@@ -1,0 +1,58 @@
+[package]
+name = "turba-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Turba — LSM-tree storage engine for xyzDB"
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+crossbeam-skiplist = "0.1"
+quick_cache = { version = "0.6", features = ["stats"] }
+lz4_flex = { version = "0.13", default-features = false }
+zstd = "0.13"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+byteorder-lite = "0.1"
+varint-rs = "2.2"
+parking_lot = "0.12"
+arc-swap = "1"
+flume = "0.11"
+libc = "0.2"
+interval-heap = "0.0.5"
+self_cell = "1.2"
+byteview = "0.10"
+# Operator-facing structured logging: compaction level transitions,
+# throttle state, WAL rotation/pruning, and snapshot events. Without it
+# the only signal would be the /stats ring.
+tracing = "0.1"
+# snapshot.meta sidecar serialisation (v0.4 cp 3.2.1). serde_json for the
+# human-readable form operators inspect during incidents; postcard for the
+# compact binary envelope — the canonical xyzdb-workspace blob format.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+postcard = { version = "1", features = ["use-std"] }
+
+[features]
+# Test-only hooks for durability regression tests. Adds an AtomicBool to
+# GroupSync that the sync thread observes each iteration so tests can pause
+# the sync to reproduce crash-window scenarios (see Finding 9 regression
+# test in tests/durability_proptest.rs). Never enable in release builds.
+durability-test-hooks = []
+
+[dev-dependencies]
+tempfile = "3"
+rand = "0.8"
+proptest = "1"
+loom = "0.7"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
+missing_safety_doc = "deny"
+# Cosmetic doc-comment formatting lints are not enforced (open-repo docs style).
+doc_lazy_continuation = "allow"
+doc_overindented_list_items = "allow"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }

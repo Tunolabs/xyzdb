@@ -1,0 +1,46 @@
+# Throwaway M1-flamegraph image — NOT the publishable artifact.
+# Builds the REAL optimized binary
+# (release opt-level 3 + fat LTO + cu=1 + target-cpu=x86-64-v3 via
+# .cargo/config.toml) with full DWARF added (the [profile.profiling] profile),
+# on a runtime that carries perf + FlameGraph so the trace resolves symbols
+# locally. This is release+symbols, not a debug build.
+#
+# Build (default, §2A DWARF-inline path — no hot-code change):
+#   docker build -f Dockerfile.profiling -t xyzdb:0.9-v3-profiling-x86 .
+# Fallback (§2B, only if the trial trace won't attribute the buckets — needs the
+# two #[cfg_attr(feature="profiling", inline(never))] lines + a `profiling`
+# feature declared in xyzdb-core and turba-engine):
+#   docker build -f Dockerfile.profiling --build-arg FEATURES=profiling -t xyzdb:0.9-v3-profiling-x86 .
+
+# bookworm builder ⇄ bookworm-slim runtime: glibc must match (finding H10).
+FROM rust:slim-bookworm AS builder
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential pkg-config ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /build
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY .cargo/ .cargo/
+COPY crates/ crates/
+COPY tools/ tools/
+ARG FEATURES=""
+# profiling inherits release, so fat LTO + cu=1 already apply; the env belt keeps
+# the image == the tagged artifact even if the profile is ever relaxed.
+RUN CARGO_PROFILE_PROFILING_LTO=fat CARGO_PROFILE_PROFILING_CODEGEN_UNITS=1 \
+    cargo build --profile profiling -p xyzdb-server ${FEATURES:+--features "$FEATURES"}
+
+# Runtime carries a shell + perf + FlameGraph (unlike the distroless publish image).
+# NOTE: `perf` must match the m6a host kernel; if `linux-perf` here is a version
+# mismatch, run perf from the host against the container PID instead (CAP_SYS_ADMIN).
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    linux-perf ca-certificates git perl procps \
+    && rm -rf /var/lib/apt/lists/*
+RUN git clone --depth=1 https://github.com/brendangregg/FlameGraph /opt/FlameGraph
+COPY --from=builder /build/target/profiling/xyzdb-server /usr/local/bin/xyzdb-server
+EXPOSE 2505
+VOLUME /data
+# Same ENTRYPOINT contract as the publish image so the agentic up_xyzdb launch
+# (`... <img> --port 2505 --path /data/bench ...`) works unchanged. Override with
+# `--entrypoint bash` for the perf sidecar (--pid=container:bench-xyzdb).
+ENTRYPOINT ["xyzdb-server"]
+CMD ["--port", "2505", "--path", "/data/xyzdb", "--bind", "0.0.0.0"]

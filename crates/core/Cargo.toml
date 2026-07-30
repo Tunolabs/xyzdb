@@ -1,0 +1,18 @@
+[package]
+name = "xyzdb-core"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+bincode.workspace = true
+postcard.workspace = true
+serde.workspace = true
+wide.workspace = true
+bytemuck.workspace = true
+
+[lints]
+workspace = true

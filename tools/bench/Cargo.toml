@@ -1,0 +1,20 @@
+[package]
+name = "xyzdb-bench"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+xyzdb-core = { path = "../../crates/core" }
+tokio.workspace = true
+rand.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+bincode.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

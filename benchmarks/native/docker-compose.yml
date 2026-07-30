@@ -1,0 +1,120 @@
+services:
+  postgres:
+    image: postgres:18
+    profiles: ["postgres", "all"]
+    shm_size: 256m
+    environment:
+      POSTGRES_PASSWORD: bench
+      POSTGRES_DB: bench
+    volumes:
+      # PG 18 convention: mount at /var/lib/postgresql; PG itself places
+      # the data subdir as /var/lib/postgresql/<MAJOR>/data internally.
+      - ${PG_DATA:-./data/pgdata}:/var/lib/postgresql
+      # PG_CONFIG_FILE override (C-13): callers can switch to e.g.
+      # postgresql-t6-hdd-cap.conf for the working-set ≫ cache regime.
+      # Default preserves prior behaviour via STORAGE_PROFILE switch.
+      - ./configs/${PG_CONFIG_FILE:-postgresql-t6-${STORAGE_PROFILE:-ssd}.conf}:/etc/postgresql/postgresql.conf
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    ports:
+      - "5432:5432"
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPUS:-2}"
+          memory: "${MEMORY:-8G}"
+
+  mongodb:
+    # Pinned to 7.0 because mongo:8.0.20 segfaults in BSONObj::getField
+    # during command epilogue under concurrent load (8 readers + writer +
+    # 2 refresh threads) on aarch64 OrbStack. Same family of upstream
+    # crashes as mongo:8.2.7 from the v0.2.4 cycle. mongo:7.0 contains
+    # mongosh in the slim image (verified) — same healthcheck pattern.
+    # Parametrised (default kept at 7.0) so the x86 run can A/B 8.x, where
+    # the aarch64 segfault may not reproduce: MONGO_IMAGE=mongo:8.0.
+    # The Rust driver (mongodb 3.7) + all harness pipelines ($merge,
+    # $lookup, $cond, $in, $slice, partial indexes) work on 7.0 and 8.x.
+    image: ${MONGO_IMAGE:-mongo:7.0}
+    profiles: ["mongo", "all"]
+    volumes:
+      - ${MONGO_DATA:-./data/mongodata}:/data/db
+      # MONGO_CONFIG_FILE override (C-13): callers can switch to e.g.
+      # mongod-t6-hdd-cap.conf for the working-set ≫ cache regime.
+      - ./configs/${MONGO_CONFIG_FILE:-mongod-t6.conf}:/etc/mongod.conf
+    command: ["mongod", "--config", "/etc/mongod.conf"]
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ping:1}).ok"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPUS:-2}"
+          memory: "${MEMORY:-8G}"
+
+  xyzdb:
+    build:
+      # context ../.. = the xyzdb repo root (where Dockerfile + Cargo.toml +
+      # crates/ live, which the Dockerfile COPYs). The Dockerfile is at that
+      # root, so the path is `Dockerfile`, not `xyzdb/Dockerfile` (which would
+      # resolve to a non-existent nested xyzdb/xyzdb/).
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        # Baked as image label `org.xyzdb.image-variant` and surfaced to the
+        # report via XYZ_IMAGE_VARIANT. The image-matrix runner
+        # (scripts/run_xyz_image_matrix.sh) sets this + DOCKER_DEFAULT_PLATFORM
+        # per cell: `x86-v3` (linux/amd64, target-cpu=x86-64-v3 / AVX2) or
+        # `arm` (linux/arm64, the x86 flag is inert). Empty = build native,
+        # variant auto-derived by the Dockerfile from the build arch.
+        XYZ_IMAGE_VARIANT: ${XYZ_IMAGE_VARIANT:-}
+    profiles: ["xyzdb", "all"]
+    # v0.4 cp 6.2.3a — soak gate Sidecar D crash-loop detection relies
+    # on the container restarting on engine exit. `unless-stopped` is
+    # opt-in (a manual `docker compose down` still stops the service).
+    restart: unless-stopped
+    # Default `info` preserves prior behaviour; benches export RUST_LOG=warn to
+    # silence per-query plan_scan logging that contaminates latency.
+    environment:
+      - RUST_LOG=${RUST_LOG:-info}
+    volumes:
+      - ${XYZ_DATA:-./data/xyzdata}:/data
+    command:
+      - "--path"
+      - "/data/bench"
+      - "--port"
+      - "2505"
+      - "--bind"
+      - "0.0.0.0"
+      # The bench engine runs on an isolated compose network with no token; the
+      # 1.0 default refuses a non-loopback bind without auth, so opt out here.
+      - "--insecure-allow-no-auth"
+      - "--storage-profile"
+      - "${STORAGE_PROFILE:-ssd}"
+      - "--io-scheduler"
+      - "${IO_SCHEDULER:-ssd}"
+      - "--durability"
+      - "${DURABILITY:-durable}"
+      - "--cache-size"
+      - "${CACHE_SIZE:-1024}"
+      - "--throttle-profile"
+      - "${THROTTLE:-bulk}"
+      - "--batch-interval"
+      - "${BATCH_INTERVAL:-100}"
+      # NEAREST time-budget airbag. Default matches the engine (3000ms, calibrated);
+      # set NEAREST_BUDGET_MS=0 to measure unguarded latency during calibration.
+      - "--nearest-budget-ms"
+      - "${NEAREST_BUDGET_MS:-3000}"
+    ports:
+      - "2505:2505"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPUS:-2}"
+          memory: "${MEMORY:-8G}"

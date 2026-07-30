@@ -1,0 +1,22 @@
+# v3 flip (0.9 Fase 1) — AVX2 baseline for the x86-64 LINUX publish build ONLY.
+#
+# TARGET-SCOPED, deliberately NOT `[build] rustflags`: a global `[build]` section
+# would also reach the arm64 dev image (aarch64) and the macOS host, where
+# `target-cpu=x86-64-v3` is meaningless. Scoping to the x86-64 linux triple means
+# only the publish build (built for linux/amd64) picks it up; arm64 dev and the
+# Mac host inherit nothing.
+#
+# NAMED baseline `x86-64-v3` — NOT `target-cpu=native`. `native` bakes in the
+# *build host's* ISA: if a build box has AVX-512, the artifact would SIGILL on an
+# m6a that lacks it (and vice versa). The named v3 baseline is reproducible and
+# runs identically on m5a/m6a/m7a (all Zen/AVX2-native).
+#
+# Bit-identity: widening `wide::f32x8` from 2×SSE2 to a 256-bit VMULPS/VADDPS is
+# the SAME math per lane, SAME accumulation order — the kernel has no
+# `mul_add`/FMA, so v2 (SSE2 baseline) and v3 (AVX2) must produce BYTE-IDENTICAL
+# scores. That equality is the v2==v3 bit gate, and it is verifiable ONLY on x86
+# (ARM has nothing to widen). Until that gate
+# is green on x86, v3 carries a hard "guarantee unverified" mark, not merely
+# "unmeasured".
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "target-cpu=x86-64-v3"]

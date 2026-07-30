@@ -1,0 +1,15 @@
+# virtualenv + python caches
+.venv/
+__pycache__/
+*.pyc
+
+# real bge corpora (large binaries — rsync'd to the box, never committed)
+corpora/
+*.npy
+*.npz
+
+# generated run outputs
+results/
+results_*/
+*.jsonl
+*.log

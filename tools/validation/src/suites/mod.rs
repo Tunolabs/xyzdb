@@ -1,0 +1,10 @@
+pub mod s01_data_load;
+pub mod s02_read_patterns;
+pub mod s03_write_stress;
+pub mod s04_mixed_workload;
+pub mod s05_connections;
+pub mod s06_durability;
+pub mod s07_edge_cases;
+pub mod s08_autodiscovery;
+pub mod s09_scale_curve;
+pub mod s10_endurance;

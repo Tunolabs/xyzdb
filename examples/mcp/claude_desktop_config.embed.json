@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "xyzdb": {
+      "command": "/REPLACE/WITH/ABSOLUTE/PATH/TO/xyzdb/target/release/xyzdb-mcp",
+      "args": [
+        "--embed",
+        "/REPLACE/WITH/ABSOLUTE/PATH/TO/YOUR/DATA/DIR"
+      ]
+    }
+  }
+}

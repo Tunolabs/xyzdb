@@ -1,0 +1,6 @@
+# Align the formatting style with the crates' declared `edition = "2024"`.
+# Without an explicit `style_edition`, rustfmt infers it from the edition, which
+# makes the result depend on each contributor's rustfmt version. Pinning it here
+# keeps `cargo fmt --check` reproducible across toolchains and lets it serve as a
+# real CI gate. Reference formatter: rustfmt 1.9.0-stable.
+style_edition = "2024"

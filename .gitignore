@@ -1,0 +1,32 @@
+# Rust build artifacts
+**/target/
+
+# Cargo.lock: the workspace root lock IS tracked (the workspace ships binaries).
+# benchmarks/native keeps its own workspace lock — also tracked, for a
+# reproducible apples-to-apples cross-engine comparison.
+
+# Bench run output (regenerable); golden inputs are tracked, results are not.
+benchmarks/native/results/
+benchmarks/native/smoke-results/
+benchmarks/**/*.log
+
+# Python (bench harnesses, model export)
+**/__pycache__/
+**/*.pyc
+**/.venv/
+
+# Local data / scratch
+**/data/
+/tmp/
+
+# OS / IDE
+.DS_Store
+**/.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# License source package (workspace-only; never publish)
+/license_example/

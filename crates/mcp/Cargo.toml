@@ -1,0 +1,57 @@
+[package]
+name = "xyzdb-mcp"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Model Context Protocol (MCP) server for xyzDB. Single-tenant stdio."
+
+[[bin]]
+name = "xyzdb-mcp"
+path = "src/main.rs"
+
+[dependencies]
+# MCP SDK — strict version pin; the rmcp-macros note below explains why rmcp and
+# its macro companion must move together.
+rmcp = { version = "=1.5.0", default-features = false, features = ["server", "transport-io", "macros"] }
+# Pin the macro companion too: rmcp's caret req lets `cargo update` pull a newer
+# rmcp-macros (e.g. 1.8) whose generated `#[tool]` code calls `schema_for_input`,
+# absent from rmcp 1.5.0 — a hard compile break. Pinning here makes the good
+# version an enforced invariant for every clone, not a lockfile-only state.
+rmcp-macros = "=1.5.0"
+
+# Async runtime — workspace-managed.
+tokio = { workspace = true }
+
+# Engine integration.
+xyzdb-engine = { path = "../engine" }
+xytalk-parser = { path = "../xytalk-parser" }
+xyzdb-core = { path = "../core" }
+
+# Serialisation.
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# CLI.
+clap = { workspace = true }
+
+# Observability.
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+
+# Boundary error handling — binary-grade.
+anyhow = { workspace = true }
+
+# Correlation IDs for redacted internal errors (Pillar 1, error.rs).
+uuid = { version = "1", features = ["v7"] }
+
+# xxh3-64 for query-statement fingerprinting in telemetry events
+# (design doc §8.2 — privacy-preserving alternative to logging the
+# full statement text, which may carry PII in literal values).
+twox-hash = { version = "2", default-features = false, features = ["xxhash3_64"] }
+
+# Note: schemars is re-exported by rmcp under `rmcp::schemars` (matched
+# version, no dep graph collision). Use that import instead of a standalone
+# `schemars` dep — rmcp 1.5 ships schemars 1.x; a separate `schemars = "0.8"`
+# would create two graph copies and the trait bounds for #[tool] would fail.

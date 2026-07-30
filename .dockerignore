@@ -1,0 +1,9 @@
+target/
+benchmarks/
+.git/
+*.zip
+data/
+
+**/target/
+**/target
+**/.git/

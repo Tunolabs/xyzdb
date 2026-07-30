@@ -1,0 +1,36 @@
+[package]
+name = "xyzdb-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+rust-version = "1.85"
+license = "BUSL-1.1"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+turba-engine = { path = "../../crates/turba-engine" }
+xytalk-parser = { path = "../../crates/xytalk-parser" }
+
+[[bin]]
+name = "sst_parse_block"
+path = "fuzz_targets/sst_parse_block.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wal_parse_record"
+path = "fuzz_targets/wal_parse_record.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "xytalk_parse"
+path = "fuzz_targets/xytalk_parse.rs"
+test = false
+doc = false
+bench = false

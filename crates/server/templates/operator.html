@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>xyzDB operator surface</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root {
+  --bg: #0e1117; --fg: #d8dee4; --muted: #8a93a0;
+  --accent: #58a6ff; --good: #3fb950; --warn: #d29922; --bad: #f85149;
+  --card: #161b22; --border: #30363d;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+       background: var(--bg); color: var(--fg); }
+header { padding: 14px 22px; background: var(--card); border-bottom: 1px solid var(--border);
+         display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap; }
+header h1 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: 0.3px; }
+header .tag { color: var(--muted); font-size: 12px; }
+header .ok { color: var(--good); }
+header .err { color: var(--bad); }
+main { padding: 18px 22px; display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+       gap: 16px; max-width: 1400px; margin: 0 auto; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 6px;
+        padding: 14px 16px; }
+.card h2 { margin: 0 0 10px; font-size: 13px; font-weight: 600; letter-spacing: 0.5px;
+           text-transform: uppercase; color: var(--muted); }
+.kv { display: grid; grid-template-columns: 1fr auto; row-gap: 4px; column-gap: 18px;
+      font-variant-numeric: tabular-nums; font-size: 13px; }
+.kv .k { color: var(--muted); }
+.kv .v { text-align: right; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; }
+td.num { text-align: right; }
+.bar { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 3px; }
+.bar > i { display: block; height: 100%; background: var(--accent); }
+.bar.warn > i { background: var(--warn); }
+.bar.bad > i { background: var(--bad); }
+.spark { display: block; height: 28px; width: 100%; }
+.spark path { fill: none; stroke: var(--accent); stroke-width: 1.5; }
+.error { color: var(--bad); padding: 14px; background: var(--card); border: 1px solid var(--bad);
+         border-radius: 6px; margin: 18px 22px; }
+small { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>xyzDB operator surface</h1>
+  <span class="tag" id="status">connecting…</span>
+  <span class="tag">refresh: 5 s</span>
+  <span class="tag" id="last-update"></span>
+</header>
+
+<div id="error" class="error" style="display:none"></div>
+
+<main id="main" hidden>
+  <section class="card">
+    <h2>Process &amp; cgroup memory</h2>
+    <div class="kv" id="proc-kv"></div>
+    <small>vm rss trend (last 60 polls)</small>
+    <svg class="spark" id="spark-rss" preserveAspectRatio="none" viewBox="0 0 100 28"><path d=""></path></svg>
+  </section>
+
+  <section class="card">
+    <h2>Sync thread (group commit)</h2>
+    <div class="kv" id="sync-kv"></div>
+  </section>
+
+  <section class="card">
+    <h2>Block cache</h2>
+    <div class="kv" id="cache-kv"></div>
+  </section>
+
+  <section class="card" style="grid-column: 1 / -1">
+    <h2>Keyspaces</h2>
+    <table id="ks-tbl">
+      <thead><tr>
+        <th>name</th><th class="num">mem_active</th><th class="num">disk_sst</th>
+        <th class="num">version_sum</th><th class="num">flushed_seqno</th>
+        <th class="num">compact_ok</th><th class="num">compact_err</th>
+        <th class="num">cache_hits</th><th class="num">cache_misses</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>Ghosts</h2>
+    <div class="kv" id="ghosts-kv"></div>
+    <small>Top per-lobe (top 10 by record count)</small>
+    <table id="ghost-lobes-tbl">
+      <thead><tr><th>name</th><th>source</th><th class="num">records</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>Lane admission (v0.4 cp 4.2.1)</h2>
+    <div class="kv" id="admission-kv"></div>
+    <table id="admission-tbl">
+      <thead><tr><th>lane</th><th class="num">admitted</th><th class="num">skipped</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+// XSS mitigation. Every user-controlled string (lobe name, ghost name,
+// sync stats string forms) goes through this before being injected.
+function escapeHtml(s) {
+  if (s == null) return "";
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function fmt(n) {
+  if (n == null || isNaN(n)) return "—";
+  return Number(n).toLocaleString("en-US");
+}
+function bytes(n) {
+  if (n == null) return "—";
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KiB";
+  if (n < 1024 * 1024 * 1024) return (n / 1048576).toFixed(1) + " MiB";
+  return (n / 1073741824).toFixed(2) + " GiB";
+}
+function pct(num, denom) {
+  if (!denom) return "—";
+  return ((100 * num) / denom).toFixed(2) + "%";
+}
+
+const statusEl = document.getElementById("status");
+const lastEl = document.getElementById("last-update");
+const errEl = document.getElementById("error");
+const mainEl = document.getElementById("main");
+
+// Sparkline state for VmRSS over last 60 polls (5 s × 60 = 5 min window).
+const RSS_HISTORY_LEN = 60;
+const rssHistory = [];
+
+function setError(msg) {
+  errEl.textContent = msg;
+  errEl.style.display = "block";
+  mainEl.hidden = true;
+  statusEl.textContent = "error";
+  statusEl.className = "tag err";
+}
+function clearError() {
+  errEl.style.display = "none";
+  mainEl.hidden = false;
+}
+
+function renderKv(el, pairs) {
+  el.innerHTML = pairs
+    .map(
+      ([k, v]) =>
+        '<div class="k">' + escapeHtml(k) +
+        '</div><div class="v">' + escapeHtml(v) + "</div>"
+    )
+    .join("");
+}
+
+function renderTable(tbody, rows, cols) {
+  if (!rows.length) {
+    tbody.innerHTML =
+      '<tr><td colspan="' + cols.length + '"><small>(none)</small></td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows
+    .map((r) => {
+      return (
+        "<tr>" +
+        cols
+          .map((c) => {
+            const v = c.f(r);
+            return '<td' + (c.num ? ' class="num"' : "") + ">" + escapeHtml(v) + "</td>";
+          })
+          .join("") +
+        "</tr>"
+      );
+    })
+    .join("");
+}
+
+function renderSparkline(svgPath, values) {
+  if (!values.length) {
+    svgPath.setAttribute("d", "");
+    return;
+  }
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const stepX = 100 / Math.max(values.length - 1, 1);
+  const d = values
+    .map((v, i) => {
+      const x = (i * stepX).toFixed(2);
+      const y = (28 - ((v - min) / range) * 26 - 1).toFixed(2);
+      return (i === 0 ? "M" : "L") + x + "," + y;
+    })
+    .join(" ");
+  svgPath.setAttribute("d", d);
+}
+
+function render(s) {
+  // Process + cgroup
+  renderKv(document.getElementById("proc-kv"), [
+    ["VmRSS", bytes(s.process && s.process.vmrss_bytes)],
+    ["VmData", bytes(s.process && s.process.vmdata_bytes)],
+    ["cgroup anon", bytes(s.cgroup && s.cgroup.anon_bytes)],
+    ["cgroup file", bytes(s.cgroup && s.cgroup.file_bytes)],
+    ["cgroup active_file", bytes(s.cgroup && s.cgroup.active_file_bytes)],
+  ]);
+
+  // Sparkline trend
+  const rss = (s.process && s.process.vmrss_bytes) || 0;
+  rssHistory.push(rss);
+  while (rssHistory.length > RSS_HISTORY_LEN) rssHistory.shift();
+  renderSparkline(
+    document.querySelector("#spark-rss path"),
+    rssHistory.filter((v) => v > 0)
+  );
+
+  // Sync thread
+  const sync = s.sync_thread || {};
+  const lastTs = sync.last_successful_sync_ts_ms || 0;
+  const nowMs = Date.now();
+  const ageMs = lastTs ? nowMs - lastTs : null;
+  renderKv(document.getElementById("sync-kv"), [
+    ["last_successful_sync_ts_ms", fmt(lastTs)],
+    ["age", ageMs == null ? "(group commit disabled)" : fmt(ageMs) + " ms"],
+    ["heartbeat_count", fmt(sync.heartbeat_count)],
+  ]);
+
+  // Block cache
+  const bc = s.block_cache || {};
+  const total = (bc.hits || 0) + (bc.misses || 0);
+  renderKv(document.getElementById("cache-kv"), [
+    ["capacity", bytes(bc.capacity_bytes)],
+    ["weight", bytes(bc.weight_bytes)],
+    ["entries", fmt(bc.len)],
+    ["hits", fmt(bc.hits)],
+    ["misses", fmt(bc.misses)],
+    ["hit rate", pct(bc.hits || 0, total)],
+  ]);
+
+  // Lane admission
+  const adm = (bc.admission || []).map((entry, idx) => ({
+    lane: ["user_io_read", "writer_durable", "flush", "compaction", "scan"][idx] || "lane_" + idx,
+    admitted: entry.admitted || 0,
+    skipped: entry.skipped || 0,
+  }));
+  renderKv(document.getElementById("admission-kv"), [
+    ["lane_admission_enabled", bc.lane_admission_enabled ? "yes" : "no"],
+  ]);
+  renderTable(document.querySelector("#admission-tbl tbody"), adm, [
+    { f: (r) => r.lane },
+    { f: (r) => fmt(r.admitted), num: true },
+    { f: (r) => fmt(r.skipped), num: true },
+  ]);
+
+  // Keyspaces
+  const ksRows = Object.keys(s.keyspaces || {})
+    .sort()
+    .map((name) => {
+      const ks = s.keyspaces[name];
+      return {
+        name,
+        mem_active: bytes(ks.memory && ks.memory.mem_active_bytes),
+        disk_sst: ks.disk_sst,
+        version_sum: ks.version_sum,
+        flushed_seqno: ks.flushed_seqno,
+        compact_ok: ks.compact && ks.compact.compact_ok,
+        compact_err: ks.compact && ks.compact.compact_err,
+        cache_hits: ks.block_cache && ks.block_cache.hits,
+        cache_misses: ks.block_cache && ks.block_cache.misses,
+      };
+    });
+  renderTable(document.querySelector("#ks-tbl tbody"), ksRows, [
+    { f: (r) => r.name },
+    { f: (r) => r.mem_active, num: true },
+    { f: (r) => fmt(r.disk_sst), num: true },
+    { f: (r) => fmt(r.version_sum), num: true },
+    { f: (r) => fmt(r.flushed_seqno), num: true },
+    { f: (r) => fmt(r.compact_ok), num: true },
+    { f: (r) => fmt(r.compact_err), num: true },
+    { f: (r) => fmt(r.cache_hits), num: true },
+    { f: (r) => fmt(r.cache_misses), num: true },
+  ]);
+
+  // Ghosts
+  const g = s.ghosts || {};
+  renderKv(document.getElementById("ghosts-kv"), [
+    ["total", fmt(g.total)],
+    ["auto candidates", fmt(g.auto && g.auto.candidate_total)],
+    ["auto spawns", fmt(g.auto && g.auto.candidate_spawn)],
+    ["auto dedup_lost", fmt(g.auto && g.auto.dedup_lost)],
+  ]);
+  const lobes = (g.per_lobe || []).slice().sort((a, b) => (b.record_count || 0) - (a.record_count || 0)).slice(0, 10);
+  renderTable(document.querySelector("#ghost-lobes-tbl tbody"), lobes, [
+    { f: (r) => r.name },
+    { f: (r) => r.source_lobe },
+    { f: (r) => fmt(r.record_count), num: true },
+  ]);
+
+  lastEl.textContent = "updated " + new Date().toLocaleTimeString();
+  statusEl.textContent = "live";
+  statusEl.className = "tag ok";
+  clearError();
+}
+
+async function poll() {
+  try {
+    const r = await fetch("/stats", { cache: "no-store", credentials: "same-origin" });
+    if (!r.ok) {
+      setError("HTTP " + r.status + " " + r.statusText + " from /stats");
+      return;
+    }
+    const s = await r.json();
+    render(s);
+  } catch (e) {
+    setError("Network error: " + (e && e.message ? e.message : e));
+  }
+}
+
+poll();
+setInterval(poll, 5000);
+</script>
+</body>
+</html>

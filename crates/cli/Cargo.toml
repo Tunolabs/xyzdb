@@ -1,0 +1,21 @@
+[package]
+name = "xyzdb-cli"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+xyzdb-core = { path = "../core" }
+# v0.4 cp 3.2.2: offline snapshot restore (server NOT running) calls
+# turba_engine::snapshot::restore_snapshot directly from the CLI.
+turba-engine = { path = "../turba-engine" }
+tokio.workspace = true
+bincode.workspace = true
+serde.workspace = true
+rustyline = "14"
+clap.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,18 @@
+# Python dependencies to RUN the agentic benchmark matrix (run_envelope_full.sh).
+# Pins are the versions used for the published numbers (read from the benchmark venv).
+#
+# The rival clients talk to their engines over the network; the engines themselves are the
+# pinned Docker images named in docs/benchmark-agentic.md, so these client versions affect
+# orchestration, not the rivals' measured behaviour.
+#
+# The xyzDB client is NOT listed here: the minimal reference client ships in the repo at
+# examples/client/python (the runner puts it on PYTHONPATH) and is stdlib-only.
+#
+# Building the corpus from scratch (build_lme.py) needs the heavier deps in
+# requirements-corpus.txt — skip those if you rsync a prebuilt corpora/lme/.
+
+numpy==2.0.2
+psycopg2-binary==2.9.12       # pgvector adapter
+pgvector==0.4.2               # pgvector vector-type registration
+qdrant-client==1.16.1         # qdrant adapter
+chromadb>=1.0.0               # chroma adapter (uses the 1.0 CreateCollectionConfiguration API)

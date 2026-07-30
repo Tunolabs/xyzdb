@@ -1,0 +1,13 @@
+# xyzdb-specific compose override for the matrix runner.
+#
+# Originally this added the v0.5 `--xydisk-mode` flag. xyDisk was removed from
+# the engine, so the flag no longer exists and the base docker-compose.yml now
+# carries the full, current xyzdb command on its own. This override therefore
+# changes nothing — it is kept only as the extension point the matrix runner
+# expects (`-f docker-compose.yml -f scripts/matrix/compose-override.yml`).
+# Add xyzdb-only bench flags here if a future run needs them.
+#
+# NOTE: run_engine.sh / run_matrix_*.sh still export and log XYDISK_MODE and an
+# io-scheduler A/B dimension; that env is now inert for the xyzdb command.
+services:
+  xyzdb: {}

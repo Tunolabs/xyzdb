@@ -1,0 +1,32 @@
+[package]
+name = "xyzdb-engine"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+xyzdb-core = { path = "../core" }
+xytalk-parser = { path = "../xytalk-parser" }
+dashmap = "6"
+turba-engine = { path = "../turba-engine" }
+bincode.workspace = true
+postcard.workspace = true
+serde.workspace = true
+parking_lot = "0.12"
+bytemuck.workspace = true
+tracing.workspace = true
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+base64 = "0.22"
+# v0.3.2-ghost-singleflight: bounded mpmc queue for ghost-creator pool.
+# crossbeam-utils/epoch/skiplist already transitive via tokio/turba; this
+# adds the channel crate as a direct dep.
+crossbeam-channel = "0.5"
+
+[dev-dependencies]
+tempfile.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
