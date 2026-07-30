@@ -6,8 +6,10 @@
 FROM rust:slim-bookworm AS builder
 # Provided automatically by buildx (linux/amd64 → amd64, linux/arm64 → arm64).
 ARG TARGETARCH
-# Image variant recorded in the bench report. Defaults from the build arch when
-# the caller passes nothing: amd64 → x86-v3 (AVX2), arm64 → arm.
+# Image variant recorded as the org.xyzdb.image-variant label (set in the final
+# stage). The bench runner and the publish flow pass the explicit AVX2-baseline
+# name (x86-v3 on amd64, arm on arm64); with no --build-arg the label falls back
+# to the build arch. Declared here too so a --build-arg is accepted either stage.
 ARG XYZ_IMAGE_VARIANT=""
 # build-essential + pkg-config cover the C-compiling -sys crates (jemalloc,
 # zstd, aws-lc, ring). libssl-dev was removed: openssl-sys is absent from
@@ -50,10 +52,14 @@ RUN CARGO_PROFILE_RELEASE_LTO=fat CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
 # package manager in the runtime (no `docker exec sh`); for debugging,
 # attach a debian-slim sidecar sharing the namespace.
 FROM gcr.io/distroless/cc-debian12
-# Re-declare in this stage so the label captures the caller's value (or the
-# default from the builder stage's auto-derivation when passed through).
+# Re-declared so the label captures the caller's value. With no --build-arg it
+# falls back to the build arch ($TARGETARCH -> amd64/arm64), never empty; an
+# explicit XYZ_IMAGE_VARIANT (x86-v3 / arm, as the bench and publish flow pass)
+# wins. A LABEL cannot map amd64 -> x86-v3 on its own, so the explicit AVX2 name
+# is set by whoever builds for publication.
+ARG TARGETARCH
 ARG XYZ_IMAGE_VARIANT=""
-LABEL org.xyzdb.image-variant="${XYZ_IMAGE_VARIANT}"
+LABEL org.xyzdb.image-variant="${XYZ_IMAGE_VARIANT:-$TARGETARCH}"
 COPY --from=builder /build/target/release/xyzdb-server /usr/local/bin/
 EXPOSE 2505
 VOLUME /data

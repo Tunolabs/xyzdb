@@ -57,6 +57,7 @@ RUN CARGO_PROFILE_RELEASE_LTO=fat CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
 # The binary links only glibc/libgcc/libm (TLS is rustls, no openssl). No shell
 # or package manager in the runtime; for debugging attach a debian-slim sidecar.
 FROM gcr.io/distroless/cc-debian12
+ARG TARGETARCH
 ARG XYZ_IMAGE_VARIANT=""
 
 # ── Ownership verification for the MCP registry ────────────────────────────
@@ -65,8 +66,9 @@ ARG XYZ_IMAGE_VARIANT=""
 # is rejected. Do not edit one without the other.
 LABEL io.modelcontextprotocol.server.name="io.github.Tunolabs/xyzdb"
 
-# Provenance parity with the engine image.
-LABEL org.xyzdb.image-variant="${XYZ_IMAGE_VARIANT}"
+# Provenance parity with the engine image: explicit XYZ_IMAGE_VARIANT wins, else
+# the build arch ($TARGETARCH), never empty — the same expression as the engine.
+LABEL org.xyzdb.image-variant="${XYZ_IMAGE_VARIANT:-$TARGETARCH}"
 
 # ── OCI standard metadata (shown on the container registry listing) ─────────
 # The image is Business Source License 1.1, same as the engine. This does not
