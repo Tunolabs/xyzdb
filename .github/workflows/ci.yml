@@ -42,3 +42,58 @@ jobs:
 
       - name: Profile parity
         run: bash .ci/profile-parity.sh
+
+  # Independent job: proves the x86-64 baseline (SSE2) and x86-64-v3 (AVX2)
+  # builds produce BYTE-IDENTICAL vector scores. The scoring kernel
+  # (crates/core/src/distance.rs) uses wide::f32x8 with no mul_add/FMA, so
+  # widening 2xSSE2 into a 256-bit VMULPS/VADDPS is the same math per lane in
+  # the same accumulation order. This is the gate the .cargo/config.toml v3
+  # note refers to. It uses different RUSTFLAGS from `check`, so it neither
+  # shares nor pollutes that job's build cache.
+  bit-identity:
+    name: bit-identity (SSE2 == AVX2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install pinned toolchain
+        run: rustup show
+
+      - name: Score bit-identity across ISAs
+        run: |
+          set -euo pipefail
+          # Run the existing test (crates/core/tests/score_bit_identity.rs) under
+          # one target-cpu, echo its full output to the job log, and return only
+          # the fingerprint it prints. --nocapture is required: the fingerprint
+          # is written with eprintln! and is otherwise swallowed by libtest.
+          run_one() {
+            local cpu="$1" log
+            log="$(mktemp)"
+            if ! RUSTFLAGS="-C target-cpu=$cpu" \
+                 cargo test -p xyzdb-core --test score_bit_identity -- --nocapture \
+                 >"$log" 2>&1; then
+              cat "$log" >&2
+              echo "::error::cargo test failed under target-cpu=$cpu" >&2
+              return 1
+            fi
+            cat "$log" >&2
+            grep -oE 'fingerprint=0x[0-9a-f]+' "$log" | head -n1
+          }
+
+          base="$(run_one x86-64)"     # SSE2 baseline
+          v3="$(run_one x86-64-v3)"    # AVX2
+
+          echo "baseline (x86-64 / SSE2): $base"
+          echo "avx2     (x86-64-v3)    : $v3"
+
+          if [ -z "$base" ] || [ -z "$v3" ]; then
+            echo "::error::fingerprint not found in test output — did score_bit_identity.rs change its print format?"
+            exit 1
+          fi
+
+          if [ "$base" != "$v3" ]; then
+            echo "::error::BIT-IDENTITY GATE FAILED: baseline SSE2 ($base) != AVX2 ($v3). Two published binaries of the SAME xyzDB version would score vector search DIFFERENTLY across CPUs, which breaks the exact-search guarantee. Do NOT relax or adjust the test — an FMA/fp-contraction crept into crates/core/src/distance.rs; find and remove it."
+            exit 1
+          fi
+
+          echo "bit-identity gate GREEN: SSE2 == AVX2 == $base (crates/core/tests/score_bit_identity.rs)"
