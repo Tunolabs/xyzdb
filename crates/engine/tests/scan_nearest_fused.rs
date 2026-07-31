@@ -10,11 +10,13 @@
 //! * Gate B2 — when no vector is declared (records stay V1), the fused entry
 //!   still routes through the full path and matches it unchanged.
 
+use std::sync::atomic::Ordering::Relaxed;
 use xytalk_parser::ast::{PipelineStep, Statement};
 use xyzdb_core::error::XyzError;
 use xyzdb_core::lid::LID;
 use xyzdb_core::value::Value;
 use xyzdb_engine::engine::{Engine, QueryResult};
+use xyzdb_engine::ops::nearest::FORCE_NEAREST_STRATEGY_B;
 
 /// Embedding width. ≥ `VECTOR_F32_MIN_DIMS` (64) so the executor packs the PUT
 /// list literal into a `Value::Vector` and the record is stored V3.
@@ -833,4 +835,86 @@ fn ab_step1_accumulator_keeps_the_fused_path_bit_identical_under_ties() {
         got_ids.iter().all(|i| !i.starts_with("drop")),
         "a record failing the residual leaked into the top-k: {got_ids:?}"
     );
+}
+
+// ─── A/B step 2: B walks in key order and must EXHAUST the range ─────────────
+
+/// B feeds the same candidates in KEY order instead of score order. What step 2
+/// can break is not the tie-break — it is the EARLY EXIT: under B the survivors
+/// emerge in key order, so the first k passers are not the k best.
+///
+/// The step-1 corpus cannot catch that, and the reason is worth stating: there
+/// every vector was identical, so every score tied, so stopping early would return
+/// k tied passers — a valid top-k in all but `lid`, indistinguishable from the
+/// right answer. The gate would pass with B broken.
+///
+/// So this corpus has the INVERSE property: score grows strictly along key order,
+/// which puts the best passers at the TAIL. Any early stop therefore discards a
+/// winner visibly. `id` is assigned so key order tracks insertion order, and the
+/// query vector matches the LAST inserted record.
+#[test]
+fn ab_step2_key_order_must_exhaust_the_range() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    exec(&engine, r#"LOBE "mem""#);
+    exec(&engine, r#"VECTOR emb IN "mem""#);
+
+    // 40 records whose similarity to the query INCREASES with insertion order:
+    // coordinate 0 grows, so the last ones are the nearest. Half fail the residual
+    // so the hydrate-until-k path is exercised and the winners are interleaved.
+    let n = 40usize;
+    for i in 0..n {
+        let mut v = vec![0.0f32; DIM];
+        v[0] = (i as f32 + 1.0) / n as f32; // strictly increasing along the key
+        v[1] = 1.0 - v[0];
+        let keep = if i % 2 == 0 { "yes" } else { "no" };
+        exec(
+            &engine,
+            &format!(
+                r#"PUT {{*conv:"c1", id:"r{i:03}", keep:"{keep}", emb:{}}} IN "mem""#,
+                vec_literal(&v)
+            ),
+        );
+    }
+    // The query IS the direction the tail points at, so the best passers are last.
+    let mut q = vec![0.0f32; DIM];
+    q[0] = 1.0;
+    let query = format!(
+        r#"SCAN "mem" WHERE conv="c1" AND keep="yes" | NEAREST(emb, {}, 5, cosine)"#,
+        vec_literal(&q)
+    );
+
+    // A (score order, early exit allowed) — the reference.
+    FORCE_NEAREST_STRATEGY_B.store(false, Relaxed);
+    let a_lids = lids(exec(&engine, &query));
+    let a_ids = ids(exec(&engine, &query));
+
+    // B (key order, must exhaust).
+    FORCE_NEAREST_STRATEGY_B.store(true, Relaxed);
+    let b_lids = lids(exec(&engine, &query));
+    FORCE_NEAREST_STRATEGY_B.store(false, Relaxed);
+
+    assert_eq!(a_lids.len(), 5, "top-5 expected");
+    assert_eq!(
+        b_lids, a_lids,
+        "B diverged from A ROW FOR ROW — if B stopped at k it kept the first \
+         passers in KEY order, which on this corpus are the WORST ones"
+    );
+    // Sanity on the corpus itself: the winners really are at the tail, so an early
+    // stop would have been visible. Without this, the gate could be green because
+    // the corpus was too easy rather than because B is right.
+    assert!(
+        a_ids.iter().all(|id| {
+            id.strip_prefix('r')
+                .and_then(|n| n.parse::<usize>().ok())
+                .is_some_and(|n| n >= n_tail_threshold())
+        }),
+        "corpus is not adversarial: winners must sit at the tail of key order, got {a_ids:?}"
+    );
+}
+
+/// Winners must live in the last quarter of key order for the step-2 corpus to be
+/// able to fail an early stop.
+fn n_tail_threshold() -> usize {
+    30
 }

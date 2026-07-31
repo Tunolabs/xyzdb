@@ -29,6 +29,13 @@ const PRUNE_BLOCK: usize = 32;
 /// and the decoupled-from-cap paths trip the budget on the same cadence.
 pub(crate) const BUDGET_CHECK_STRIDE: usize = 1024;
 
+/// Test-only: force the fused path to hydrate candidates in KEY order (strategy B)
+/// instead of score order (strategy A). No-op in production until the switch of
+/// step 3 selects a strategy on its own; it exists so B can be gated on its own
+/// before any switching logic exists.
+pub static FORCE_NEAREST_STRATEGY_B: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 /// Rank `records` by similarity of their `stmt.field` embedding to the query
 /// vector and return the top `stmt.k`, most similar first.
 ///
@@ -627,9 +634,33 @@ fn try_prefix_scan_nearest(
     // scored". Surfaced only when the airbag actually cuts (below).
     let candidates = cands.len();
     let mut examined = 0usize;
+
+    // STEP 2 of the A/B switch — iteration ORDER only; the accumulator (step 1) is
+    // untouched, and neither strategy does less work than the other.
+    //
+    // A walks `cands` in SCORE order: optimal with a wide filter, degenerate with a
+    // narrow one, because it hydrates most of the bucket through random point-gets.
+    // B walks the SAME candidates in KEY order — sequential on disk — and scores the
+    // survivors. `cands` is already the candidate set, so B re-scans nothing: A and B
+    // are one algorithm with two iteration orders.
+    let strategy_b = FORCE_NEAREST_STRATEGY_B.load(std::sync::atomic::Ordering::Relaxed);
+    let mut cands = cands;
+    if strategy_b {
+        cands.sort_by(|a, b| a.key.cmp(&b.key));
+    }
+
     for c in cands {
-        if has_residual && heap.len() == k {
-            break; // k winners found — stop hydrating (the whole point).
+        // The early exit is valid ONLY in score order. Under B the survivors emerge
+        // in KEY order, so the first k passers are NOT the k best: a candidate with a
+        // later key can outscore every one of them. B must therefore EXHAUST the
+        // range; the bounded heap is what keeps that affordable, and it is why step 1
+        // had to come first.
+        //
+        // Do not "optimise" this by breaking early under B. It returns a wrong answer
+        // that looks plausible — the k rows it gives back are real passers, just not
+        // the best ones — which is the hardest kind of bug to notice.
+        if has_residual && !strategy_b && heap.len() == k {
+            break; // k winners found — stop hydrating (the whole point, under A).
         }
         scanned += 1;
         if budget_ms > 0
