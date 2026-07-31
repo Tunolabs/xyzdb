@@ -170,13 +170,14 @@ pub fn execute_put(engine: &Engine, stmt: PutStmt) -> Result<QueryResult> {
         .as_micros() as u64;
     let type_id = type_id_from_fields(&fields);
     let seq = RECORD_SEQ.fetch_add(1, Ordering::Relaxed);
-    let spatial_key = SpatialKey::new(
-        lobe_id,
-        gravity_hash,
-        type_id,
-        normalize_timestamp(now_micros),
-        seq,
-    );
+    // Sub-gravity: place the record in its satellite when the lobe declares one;
+    // otherwise the unchanged `new` (sat 0). One helper feeds both placement here
+    // and bounded-scan detection, so they canonicalise the value identically.
+    let ts = normalize_timestamp(now_micros);
+    let spatial_key = match engine.satellite_sat_for(&stmt.lobe, &fields) {
+        Some(sat) => SpatialKey::new_with_sat(lobe_id, gravity_hash, sat, type_id, ts, seq),
+        None => SpatialKey::new(lobe_id, gravity_hash, type_id, ts, seq),
+    };
     let spatial_bytes = spatial_key.to_bytes();
 
     // 7. Build Record
@@ -757,7 +758,10 @@ pub fn execute_put_batch(engine: &Engine, stmt: PutBatchStmt) -> Result<QueryRes
         let ts = normalize_timestamp(now_micros + idx as u64);
         let type_id = type_id_from_fields(&fields);
         let seq = RECORD_SEQ.fetch_add(1, Ordering::Relaxed);
-        let spatial_key = SpatialKey::new(lobe_id, gravity_hash, type_id, ts, seq);
+        let spatial_key = match engine.satellite_sat_for(&stmt.lobe, &fields) {
+            Some(sat) => SpatialKey::new_with_sat(lobe_id, gravity_hash, sat, type_id, ts, seq),
+            None => SpatialKey::new(lobe_id, gravity_hash, type_id, ts, seq),
+        };
         let spatial_bytes = spatial_key.to_bytes();
 
         // Record
@@ -970,7 +974,10 @@ pub fn execute_bulk_insert(
         let ts = normalize_timestamp(now_micros + idx as u64);
         let type_id = type_id_from_fields(&fields);
         let seq = RECORD_SEQ.fetch_add(1, Ordering::Relaxed);
-        let spatial_key = SpatialKey::new(lobe_id, gravity_hash, type_id, ts, seq);
+        let spatial_key = match engine.satellite_sat_for(lobe_name, &fields) {
+            Some(sat) => SpatialKey::new_with_sat(lobe_id, gravity_hash, sat, type_id, ts, seq),
+            None => SpatialKey::new(lobe_id, gravity_hash, type_id, ts, seq),
+        };
         let spatial_bytes = spatial_key.to_bytes();
 
         let record = Record {

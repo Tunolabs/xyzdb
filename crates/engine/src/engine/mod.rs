@@ -213,6 +213,10 @@ mod verbs;
 /// Test-only MIGRATE crash-injection knobs (durability gate). No-ops in
 /// production; re-exported so the durability test suite can drive them.
 pub use maintenance::{FORCE_MIGRATE_ABORT_AFTER_WINDOWS, MIGRATE_WINDOW_LIMIT};
+/// Test-only satellite bounded-scan knobs. No-ops in production; re-exported so
+/// the satellite test suite can drive the route-equivalence and anti-collision
+/// gates. See `engine::satellites`.
+pub use satellites::{SAT_FORCE_PARENT_SCAN, SAT_SKIP_ANTICOLLISION_RESIDUAL};
 mod lifecycle;
 mod stats;
 

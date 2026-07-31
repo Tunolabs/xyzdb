@@ -515,9 +515,47 @@ pub(crate) fn detect_gravity_eq(
         .pinned_gravity_hash(core_filters)
 }
 
+/// Resolve the range for a gravity-eq scan, narrowing to ONE satellite
+/// sub-range when the query also pins the lobe's declared satellite field
+/// (sub-gravity). Returns `(key_min, key_max, apply_residual)`:
+/// - **Satellite path** — the range is one `sat` sub-bucket of the gravity
+///   bucket; `apply_residual` is the anti-collision guard (`hash16` collides),
+///   on in production, droppable only by the `SAT_SKIP_ANTICOLLISION_RESIDUAL`
+///   test knob.
+/// - **Gravity path** — the full gravity bucket, residual always on.
+///
+/// It is a pure optimisation: a satellite's rows are contiguous within the
+/// parent bucket and emit in the same `z_order → seq` order, so the bounded
+/// scan yields the same rows in the same sequence the parent scan would.
+fn resolve_gravity_scan_range(
+    engine: &Engine,
+    lobe_name: &str,
+    lobe_id: u16,
+    gravity_hash: u64,
+    filter_expr: &Option<xytalk_parser::ast::FilterExpr>,
+) -> (
+    [u8; xyzdb_core::key::SPATIAL_KEY_SIZE],
+    [u8; xyzdb_core::key::SPATIAL_KEY_SIZE],
+    bool,
+) {
+    let core_filters = crate::ops::convert_filter_expr(filter_expr);
+    match engine.detect_satellite_eq(lobe_name, &core_filters) {
+        Some(sat) => {
+            let (min, max) = SpatialKey::prefix_for_satellite(lobe_id, gravity_hash, sat);
+            (min, max, engine.satellite_residual_active())
+        }
+        None => {
+            let (min, max) = SpatialKey::prefix_for_gravity(lobe_id, gravity_hash);
+            (min, max, true)
+        }
+    }
+}
+
 /// Finding 13: bounded range scan over the gravity bucket of one specific
 /// gravity-field value. Replaces the full-lobe Primary scan when the
-/// query has the single-Eq-on-gravity-field shape.
+/// query has the single-Eq-on-gravity-field shape. When the query ALSO pins a
+/// declared satellite field, [`resolve_gravity_scan_range`] narrows it further
+/// to that satellite sub-range.
 ///
 /// Hash collisions (21-bit hash space, ~2 M slots) are possible but rare.
 /// The post-range filter via `record_matches_opt_expr` covers them: any
@@ -531,9 +569,10 @@ fn scan_primary_gravity_indexed(
     limit: Option<u64>,
     budget_ms: u64,
 ) -> Result<(Vec<Record>, bool)> {
-    let (key_min, key_max) = SpatialKey::prefix_for_gravity(lobe_id, gravity_hash);
-
     let lobe_name = engine.lobe_name_for_id(lobe_id);
+    let (key_min, key_max, apply_residual) =
+        resolve_gravity_scan_range(engine, &lobe_name, lobe_id, gravity_hash, filter_expr);
+
     let fr_guard = engine.field_registry.read();
     let fd = fr_guard.get_dict(lobe_id);
     let mut results = Vec::new();
@@ -560,7 +599,7 @@ fn scan_primary_gravity_indexed(
         let val = &entry.value;
         if let Ok(record) =
             crate::ops::deserialize_hydrated(engine, &entry.key, val, &lobe_name, fd)
-            && crate::ops::record_matches_opt_expr(&record, filter_expr)
+            && (!apply_residual || crate::ops::record_matches_opt_expr(&record, filter_expr))
         {
             results.push(record);
             // Overscan by one: fetch a single record past the cap to prove the
@@ -588,9 +627,10 @@ fn scan_primary_gravity_indexed_topn(
     descending: bool,
     limit: usize,
 ) -> Result<Vec<Record>> {
-    let (key_min, key_max) = SpatialKey::prefix_for_gravity(lobe_id, gravity_hash);
-
     let lobe_name = engine.lobe_name_for_id(lobe_id);
+    let (key_min, key_max, apply_residual) =
+        resolve_gravity_scan_range(engine, &lobe_name, lobe_id, gravity_hash, filter_expr);
+
     let fr_guard = engine.field_registry.read();
     let fd = fr_guard.get_dict(lobe_id);
     let mut heap: BinaryHeap<HeapEntry> = BinaryHeap::with_capacity(limit + 1);
@@ -604,7 +644,7 @@ fn scan_primary_gravity_indexed_topn(
         let val = &entry.value;
         if let Ok(record) =
             crate::ops::deserialize_hydrated(engine, &entry.key, val, &lobe_name, fd)
-            && crate::ops::record_matches_opt_expr(&record, filter_expr)
+            && (!apply_residual || crate::ops::record_matches_opt_expr(&record, filter_expr))
         {
             let sort_val = xyzdb_core::record::resolve_path(&record.fields, field).cloned();
             heap.push(HeapEntry {
@@ -889,7 +929,16 @@ pub fn execute_scan_aggregate(
             // Finding 13: gravity-indexed fast path also applies to AGGREGATE
             // (no ORDER BY here; scan over the bounded range, observe each).
             if let Some(ghash) = detect_gravity_eq(engine, &stmt.lobe, &core_filters) {
-                let (key_min, key_max) = SpatialKey::prefix_for_gravity(lobe_id, ghash);
+                // Sub-gravity: the count win. A satellite-eq narrows this to one
+                // sub-range → count only the matches, not the whole bucket. The
+                // residual (anti-collision) stays on.
+                let (key_min, key_max, apply_residual) = resolve_gravity_scan_range(
+                    engine,
+                    &lobe_name,
+                    lobe_id,
+                    ghash,
+                    &stmt.filter_expr,
+                );
                 for entry in engine
                     .turba
                     .spatial
@@ -899,7 +948,8 @@ pub fn execute_scan_aggregate(
                     let val = &entry.value;
                     if let Ok(record) =
                         crate::ops::deserialize_hydrated(engine, &entry.key, val, &lobe_name, fd)
-                        && crate::ops::record_matches_opt_expr(&record, &stmt.filter_expr)
+                        && (!apply_residual
+                            || crate::ops::record_matches_opt_expr(&record, &stmt.filter_expr))
                     {
                         acc.observe(&record);
                         counted += 1;
@@ -1159,7 +1209,15 @@ pub fn execute_scan_group_aggregate(
             // ghost's group_fields). The bounded range scan still beats the
             // full-lobe scan; aggregation runs over fewer records.
             if let Some(ghash) = detect_gravity_eq(engine, &stmt.lobe, &core_filters) {
-                let (key_min, key_max) = SpatialKey::prefix_for_gravity(lobe_id, ghash);
+                // Sub-gravity: narrow to one satellite sub-range when the query
+                // also pins a declared satellite field; residual stays on.
+                let (key_min, key_max, apply_residual) = resolve_gravity_scan_range(
+                    engine,
+                    &lobe_name,
+                    lobe_id,
+                    ghash,
+                    &stmt.filter_expr,
+                );
                 for entry in engine
                     .turba
                     .spatial
@@ -1169,7 +1227,7 @@ pub fn execute_scan_group_aggregate(
                     let val = &entry.value;
                     if let Ok(record) =
                         crate::ops::deserialize_hydrated(engine, &entry.key, val, &lobe_name, fd)
-                        && record.matches_filters(&core_filters)
+                        && (!apply_residual || record.matches_filters(&core_filters))
                     {
                         observe_record(&record);
                         counted += 1;

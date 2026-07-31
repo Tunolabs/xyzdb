@@ -107,8 +107,32 @@ impl SpatialKey {
         }
     }
 
+    /// Build a spatial key with an explicit satellite (`sat`) axis. Same as
+    /// [`SpatialKey::new`] but places the record in sub-bucket `sat` of its
+    /// gravity bucket instead of the default satellite 0. The write path calls
+    /// this for a lobe with a declared `SatelliteSpec`; every other caller keeps
+    /// using [`SpatialKey::new`] (sat 0), so the two paths cannot diverge.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_sat(
+        lobe_id: u16,
+        gravity_hash: u64,
+        sat: u16,
+        type_id: u16,
+        timestamp_norm: u32,
+        seq: u64,
+    ) -> Self {
+        Self {
+            lobe_id,
+            gravity_hash: gravity_hash & GRAVITY_HASH_MASK,
+            sat,
+            type_id,
+            timestamp_norm: timestamp_norm & 0x1F_FFFF,
+            seq,
+        }
+    }
+
     /// Serialize to the 24-byte big-endian representation for Turba
-    /// storage. See struct doc for the layout. `sat` is always 0 today.
+    /// storage. See struct doc for the layout.
     pub fn to_bytes(&self) -> [u8; SPATIAL_KEY_SIZE] {
         let z2d = z_order_2d_encode(self.type_id as u32 & 0x1F_FFFF, self.timestamp_norm);
         let mut buf = [0u8; SPATIAL_KEY_SIZE];
@@ -170,6 +194,44 @@ impl SpatialKey {
         key_max[8..24].copy_from_slice(&[0xFF; 16]);
         (key_min, key_max)
     }
+
+    /// Compute (start_key, end_key) for a range scan over ONE satellite
+    /// (sub-bucket) of a gravity bucket: every record sharing
+    /// `(lobe_id, gravity_hash, sat)`. Fixes bytes 0..10 (lobe + gravity + sat)
+    /// and saturates only the tail (`z_order_2d` + `seq`, bytes 10..24), so the
+    /// range walks the satellite in `z_order_2d → seq` order — the SAME order,
+    /// on the SAME rows, that the parent-bucket scan ([`Self::prefix_for_gravity`])
+    /// would emit for this satellite's rows (they are contiguous within the
+    /// parent). This is why the bounded scan is a pure optimisation of the parent
+    /// scan, not a different result.
+    ///
+    /// `hash16` collides (a `u16` axis), so this range can contain intruder rows
+    /// from a different field value that hashed to the same `sat`. The caller
+    /// MUST still apply the field predicate as a residual to drop them — the
+    /// range narrows the candidates, the residual guarantees correctness.
+    pub fn prefix_for_satellite(
+        lobe_id: u16,
+        gravity_hash: u64,
+        sat: u16,
+    ) -> ([u8; SPATIAL_KEY_SIZE], [u8; SPATIAL_KEY_SIZE]) {
+        let gh = gravity_hash & GRAVITY_HASH_MASK;
+        let sat_be = sat.to_be_bytes();
+
+        let mut key_min = [0u8; SPATIAL_KEY_SIZE];
+        key_min[0..2].copy_from_slice(&lobe_id.to_be_bytes());
+        key_min[2..8].copy_from_slice(&u48_to_be_bytes(gh));
+        key_min[8..10].copy_from_slice(&sat_be);
+        // bytes 10..24 already zero (z_order_2d + seq).
+
+        let mut key_max = [0u8; SPATIAL_KEY_SIZE];
+        key_max[0..2].copy_from_slice(&lobe_id.to_be_bytes());
+        key_max[2..8].copy_from_slice(&u48_to_be_bytes(gh));
+        key_max[8..10].copy_from_slice(&sat_be);
+        // Saturate only z_order_2d (10..16) + seq (16..24); sat is FIXED, so the
+        // range stays inside this one satellite.
+        key_max[10..24].copy_from_slice(&[0xFF; 14]);
+        (key_min, key_max)
+    }
 }
 
 /// Hash a string to 48 bits for use as `gravity_hash`.
@@ -181,6 +243,20 @@ pub fn hash_to_48bits(s: &str) -> u64 {
         h = h.wrapping_mul(0x100000001b3);
     }
     h & GRAVITY_HASH_MASK
+}
+
+/// Hash a string to 16 bits for use as the satellite (`sat`) axis.
+/// FNV-1a folded to 16 bits (xor-fold, so all input bits reach the result).
+/// Deterministic; no salt. The 16-bit width collides by design — the read path
+/// applies the field predicate as a residual to guarantee exactness.
+pub fn hash_to_16bits(s: &str) -> u16 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in s.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    // Xor-fold the 64-bit hash down to 16 bits so high-entropy bits participate.
+    ((h ^ (h >> 16) ^ (h >> 32) ^ (h >> 48)) & 0xFFFF) as u16
 }
 
 /// Normalise a microsecond timestamp to 21 bits.
@@ -291,5 +367,63 @@ mod tests {
         let b = hash_to_48bits("ACME-001");
         assert_eq!(a, b);
         assert!(a <= GRAVITY_HASH_MASK);
+    }
+
+    #[test]
+    fn hash16_deterministic() {
+        assert_eq!(hash_to_16bits("click"), hash_to_16bits("click"));
+        // Different values (usually) differ; this pair is just a smoke check.
+        assert_ne!(hash_to_16bits("click"), hash_to_16bits("view"));
+    }
+
+    #[test]
+    fn new_with_sat_roundtrips_nonzero_sat() {
+        let key = SpatialKey::new_with_sat(1, 0x1A3F7, 0xBEEF, 3, 12345, 42);
+        let bytes = key.to_bytes();
+        // sat occupies bytes 8..10, big-endian.
+        assert_eq!(&bytes[8..10], &0xBEEF_u16.to_be_bytes());
+        let decoded = SpatialKey::from_bytes(&bytes);
+        assert_eq!(decoded.sat, 0xBEEF);
+        assert_eq!(decoded.gravity_hash, 0x1A3F7);
+        assert_eq!(decoded.seq, 42);
+    }
+
+    #[test]
+    fn satellite_prefix_covers_only_its_satellite() {
+        let (min, max) = SpatialKey::prefix_for_satellite(1, 42, 7);
+        // A key in satellite 7 of bucket (1,42) is inside [min, max].
+        let inside = SpatialKey::new_with_sat(1, 42, 7, 0, 999, 5).to_bytes();
+        assert!(inside >= min && inside <= max);
+        // The same lobe+gravity but a NEIGHBOURING satellite is outside.
+        let other_sat_hi = SpatialKey::new_with_sat(1, 42, 8, 0, 0, 0).to_bytes();
+        assert!(
+            other_sat_hi > max,
+            "satellite 8 must sort above satellite 7's max"
+        );
+        let other_sat_lo = SpatialKey::new_with_sat(1, 42, 6, 0, 0xFFFFF, u64::MAX).to_bytes();
+        assert!(
+            other_sat_lo < min,
+            "satellite 6 must sort below satellite 7's min"
+        );
+        // sat 0 (the default/dumpster) is also outside a sat=7 bounded scan.
+        let default_sat = SpatialKey::new(1, 42, 0, 0, 0).to_bytes();
+        assert!(
+            default_sat < min,
+            "satellite 0 must sort below satellite 7's min"
+        );
+    }
+
+    #[test]
+    fn satellite_prefix_is_a_subrange_of_the_parent() {
+        // Every satellite range must sit within the parent gravity range, so a
+        // bounded scan reads a subset of what the parent scan reads.
+        let (pmin, pmax) = SpatialKey::prefix_for_gravity(1, 42);
+        for sat in [0u16, 1, 7, 0x00FF, 0xBEEF, 0xFFFF] {
+            let (smin, smax) = SpatialKey::prefix_for_satellite(1, 42, sat);
+            assert!(
+                smin >= pmin && smax <= pmax,
+                "satellite {sat} escapes the parent range"
+            );
+        }
     }
 }

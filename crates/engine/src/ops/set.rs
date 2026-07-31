@@ -141,15 +141,24 @@ pub fn execute_set(
         // repoint identity. One batch ⇒ crash-atomic.
         let old_gh = SpatialKey::gravity_hash_from_bytes(&sk_array);
         let new_gh = crate::ops::put::gravity_hash_for(engine, &record.lobe_name, &rec.fields);
+        // Sub-gravity: a SET that changes the satellite field must MOVE the
+        // record to its new satellite, exactly as a changed gravity field
+        // re-buckets it — else the record is stranded in the old satellite,
+        // invisible to a bounded (per-satellite) query on its new value.
+        // old_sat is the key's bytes 8..10; new_sat comes from the post-SET
+        // fields (None ⇒ the lobe has no satellite axis, sat stays 0).
+        let old_sat = u16::from_be_bytes([sk_array[8], sk_array[9]]);
+        let new_sat = engine.satellite_sat_for(&record.lobe_name, &rec.fields);
+        let sat_changed = new_sat.is_some_and(|ns| ns != old_sat);
         let mut batch = engine.turba.batch();
-        let final_sk: [u8; SPATIAL_KEY_SIZE] = if new_gh != old_gh {
-            let new_sk = SpatialKey::new(
-                lobe_id,
-                new_gh,
-                crate::ops::put::type_id_from_fields(&rec.fields),
-                normalize_timestamp(now as u64),
-                crate::ops::put::next_record_seq(),
-            )
+        let final_sk: [u8; SPATIAL_KEY_SIZE] = if new_gh != old_gh || sat_changed {
+            let type_id = crate::ops::put::type_id_from_fields(&rec.fields);
+            let ts = normalize_timestamp(now as u64);
+            let seq = crate::ops::put::next_record_seq();
+            let new_sk = match new_sat {
+                Some(ns) => SpatialKey::new_with_sat(lobe_id, new_gh, ns, type_id, ts, seq),
+                None => SpatialKey::new(lobe_id, new_gh, type_id, ts, seq),
+            }
             .to_bytes();
             batch.remove_spatial(&sk_array);
             batch.put_spatial(new_sk.as_slice(), updated.as_slice());

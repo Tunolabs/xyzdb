@@ -222,22 +222,27 @@ PUT {*tenant: "acme", *region: "eu", _type: "Login"} IN "events"
 SATELLITE BY <field> IN "lobe"
 ```
 
-A third foundational axis, sibling to gravity (placement) and vector (search). Where gravity decides *which bucket* a record lands in, the satellite axis decides *how one bucket is sub-divided*: it names the single field whose value maps to the `sat` axis of the record's spatial key, so a large gravity bucket splits into ordered sub-buckets. The intent is that a query filtering on the satellite field scans one satellite instead of the whole parent bucket.
+A third foundational axis, sibling to gravity (placement) and vector (search). Where gravity decides *which bucket* a record lands in, the satellite axis decides *how one bucket is sub-divided*: it names the single field whose value maps (via a 16-bit hash) to the `sat` axis of the record's spatial key, so a large gravity bucket splits into ordered sub-buckets. A query that filters on **both** the gravity field and the satellite field then scans one satellite sub-range instead of the whole parent bucket — a `SCAN … WHERE gravity = g AND kind = k` (and the same shape feeding `AGGREGATE count()`) reads only that satellite.
 
 **Rules:**
 
 - **One axis per lobe.** A lobe has at most one satellite field; re-declaring the same field is a no-op, declaring a different one is rejected. (The `sat` axis is a single `u16`; two fields cannot share it — a two-level split is a deferred design.)
 - **Declared on an empty lobe.** `SATELLITE BY` is refused if the lobe already holds records: declaring the axis over existing data would leave those records in the default sub-bucket, unreachable by a bounded per-satellite query. Declare it before the first write. (Re-packing existing data under a newly declared axis is a later, explicitly-justified path.)
 - **Leaving is free.** Retracting the axis never loses data or correctness: the parent-bucket scan already covers every satellite, so reads stay exact — only the bounded-scan speed-up is given up.
+- **Transparent optimisation.** The bounded per-satellite scan is a pure optimisation: it returns exactly the same rows, in exactly the same order, as the full parent-bucket scan would. The 16-bit hash collides by design, so the read path always re-applies the field predicate as a residual — a record that hashed into the same satellite but does not truly match is dropped. Correctness never depends on the hash being collision-free.
+- **A changed satellite field moves the record.** A `SET` that changes the satellite field re-places the record into its new satellite (mirroring re-gravitation), so a bounded query on the new value finds it. (`ON CONFLICT UPDATE`, like its gravity behaviour, updates in place and does not re-place — use `SET` to move.)
 - Persisted in the dictionary keyspace; survives restart.
 
-> **Status — declaration only.** This release ships the *declaration* surface: the grammar, persistence, the one-axis-per-lobe rule, and the empty-lobe requirement. **Placement is not yet active** — every record is still written to the default sub-bucket, so a declared satellite currently changes nothing observable about where records land or how queries read them. The value (bounded per-satellite scans) and the emission-order consequences of activating placement will be documented here when that phase lands.
+> **When it pays.** The axis only speeds things up when the field is present on **most** records of the lobe. Records missing the field (and any value whose 16-bit hash is 0) share the default satellite 0; if many records lack the field, satellite 0 becomes the large bucket and the bounded scan saves nothing. Choose a field that is near-universal in the lobe.
 
 ```text
 -- Declare the sub-gravity axis on an empty lobe, up front
 GRAVITY BY scope IN "events"
 SATELLITE BY kind IN "events"
 PUT {scope: "s1", kind: "click", n: 1} IN "events"
+-- Bounded to the "click" satellite of the "s1" gravity bucket:
+SCAN "events" WHERE scope = "s1" AND kind = "click"
+SCAN "events" WHERE scope = "s1" AND kind = "click" | AGGREGATE count()
 ```
 
 #### 2.3 PUT — Insert Record

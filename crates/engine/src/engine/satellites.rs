@@ -1,21 +1,108 @@
 use super::*;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Test-only knobs for the satellite bounded-scan gates. No-ops in production
+/// (nothing sets them); re-exported so the satellite test suite can drive them.
+///
+/// - `SAT_FORCE_PARENT_SCAN` makes [`Engine::detect_satellite_eq`] return `None`,
+///   so a query that WOULD take the bounded per-satellite range instead falls
+///   back to the parent-bucket scan. The route-equivalence gate runs the same
+///   query both ways and asserts identical row *sequences* (a pure optimisation).
+/// - `SAT_SKIP_ANTICOLLISION_RESIDUAL` makes the satellite-bounded read paths
+///   SKIP the residual filter that drops `hash16` collisions. The collision gate
+///   flips it on as a negative control: with the residual gone, an intruder from
+///   a colliding value leaks and the test must fail.
+pub static SAT_FORCE_PARENT_SCAN: AtomicBool = AtomicBool::new(false);
+pub static SAT_SKIP_ANTICOLLISION_RESIDUAL: AtomicBool = AtomicBool::new(false);
 
 impl Engine {
-    /// The lobe's sub-gravity (satellite) spec, if declared. The write path will
-    /// consult this to decide the `sat` axis of a record's spatial key, mirroring
-    /// how [`Self::get_gravity_spec`] feeds placement and [`Self::get_vector_spec`]
-    /// feeds the searchable field.
-    ///
-    /// Declaration-only phase: this accessor exists and returns the persisted
-    /// spec, but no write path reads it yet — placement stays at `sat = 0`.
-    // Wired but unread until the placement/read phase (Tanda 2) consults it in
-    // the PUT/SET/NEAREST/SCAN paths, mirroring get_vector_spec's call sites.
-    #[allow(dead_code)]
+    /// Whether the anti-collision residual is currently active on the satellite
+    /// bounded paths (true in production; false only when a test disables it via
+    /// `SAT_SKIP_ANTICOLLISION_RESIDUAL`).
+    pub(crate) fn satellite_residual_active(&self) -> bool {
+        !SAT_SKIP_ANTICOLLISION_RESIDUAL.load(Ordering::Relaxed)
+    }
+
+    /// The lobe's sub-gravity (satellite) spec, if declared. Consulted by the
+    /// placement helper ([`Self::satellite_sat_for`]) and the bounded-scan
+    /// detector ([`Self::detect_satellite_eq`]), mirroring how
+    /// [`Self::get_gravity_spec`] / [`Self::get_vector_spec`] feed their paths.
     pub(crate) fn get_satellite_spec(
         &self,
         lobe: &str,
     ) -> Option<crate::satellite_spec::SatelliteSpec> {
         self.satellite_specs.read().get(lobe).cloned()
+    }
+
+    /// Detect a satellite-bounded scan: `Some(sat)` when `lobe` declares a
+    /// satellite axis AND the query's flattened filters carry an `Eq` on that
+    /// field. The read path then scans one satellite sub-range instead of the
+    /// whole gravity bucket, keeping the field predicate as an anti-collision
+    /// residual. Mirrors [`crate::ops::scan::detect_gravity_eq`] /
+    /// `GravitySpec::pinned_gravity_hash`.
+    ///
+    /// Returns `None` (⇒ parent-bucket scan) when: no satellite axis, the field
+    /// is absent from the filters, the op is not `Eq`, the field appears twice,
+    /// or the `SAT_FORCE_PARENT_SCAN` test knob is set. Routes the literal value
+    /// through the SAME [`Self::satellite_sat_for`] canonicalisation the write
+    /// path used, so detection and placement cannot diverge.
+    pub(crate) fn detect_satellite_eq(
+        &self,
+        lobe: &str,
+        core_filters: &[(
+            String,
+            xyzdb_core::record::FilterOp,
+            xyzdb_core::value::Value,
+        )],
+    ) -> Option<u16> {
+        use xyzdb_core::record::FilterOp;
+        if SAT_FORCE_PARENT_SCAN.load(Ordering::Relaxed) {
+            return None;
+        }
+        let spec = self.get_satellite_spec(lobe)?;
+        let mut found: Option<&xyzdb_core::value::Value> = None;
+        for (f, op, v) in core_filters {
+            if f == &spec.field {
+                if !matches!(op, FilterOp::Eq) {
+                    return None; // a range/≠ on the satellite field → no bounded scan
+                }
+                if found.is_some() {
+                    return None; // two Eq on the same field → bail conservatively
+                }
+                found = Some(v);
+            }
+        }
+        let v = found?; // field not equality-constrained → parent scan
+        Some(xyzdb_core::key::hash_to_16bits(
+            &crate::ops::put::value_to_anchor_string(v),
+        ))
+    }
+
+    /// The satellite (`sat`) axis for a record of `lobe`, given its fields.
+    ///
+    /// Returns `None` when the lobe has no declared satellite axis — the caller
+    /// then uses [`SpatialKey::new`] (sat 0), so a non-satellite lobe's write
+    /// path is byte-for-byte unchanged. Returns `Some(sat)` when declared:
+    /// `hash_to_16bits(value_to_anchor_string(field))`, or `Some(0)` when the
+    /// field is ABSENT (the default satellite — the shared "dumpster"; a bounded
+    /// query still resolves it exactly because the read path applies the field
+    /// predicate as a residual).
+    ///
+    /// Both the write path (placement) and the read path (bounded-scan
+    /// detection) MUST route the field value through this one function so they
+    /// canonicalise identically — otherwise placement and detection diverge and
+    /// the bounded scan silently finds nothing (the gravity keel footgun).
+    pub(crate) fn satellite_sat_for(
+        &self,
+        lobe: &str,
+        fields: &std::collections::BTreeMap<String, xyzdb_core::value::Value>,
+    ) -> Option<u16> {
+        let spec = self.get_satellite_spec(lobe)?;
+        let sat = fields
+            .get(&spec.field)
+            .map(|v| xyzdb_core::key::hash_to_16bits(&crate::ops::put::value_to_anchor_string(v)))
+            .unwrap_or(0);
+        Some(sat)
     }
 
     /// Execute `SATELLITE BY <field> IN "lobe"`: declare the lobe's sub-gravity
