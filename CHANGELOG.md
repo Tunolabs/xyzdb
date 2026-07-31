@@ -32,6 +32,25 @@ All notable changes to xyzDB are documented here. Format based on [Keep a Change
   caps) stays byte-identical, so `has_more`-based clients are unaffected.
 
 ### Fixed
+- **A `UNIQUE` anchor can no longer be duplicated after an unclean restart.** The
+  duplicate-anchor check is a bloom-gated point read, and a post-recovery SSTable
+  can carry a bloom that disagrees with its data — so the check could report
+  "absent" for an anchor that exists and `PUT` would write a second record under
+  a key declared unique, silently. When a process replayed WAL at open (i.e. the
+  previous run did not shut down cleanly), an anchor miss is now re-confirmed
+  without the bloom before it is trusted, and a hit is logged loudly. Outside that
+  window nothing changes and nothing is paid: the check's common case is a
+  legitimate miss, so confirming unconditionally would cost a full level descent
+  on every anchored insert. This closes the duplicate-record exposure
+  independently of the underlying bloom defect, whose root cause is still open.
+  **Declared cost:** the confirmation stays armed for the whole life of a process
+  that recovered — it cannot be switched off early without knowing the defect is
+  gone — so after an unclean restart a write-heavy anchored lobe pays a level
+  descent per anchor miss until the next restart. The mode is no longer something
+  to infer from slower writes: `recovered_from_wal` is published in `STATS` and as
+  the `xyzdb_recovered_from_wal` gauge on `/metrics`. If the cost ever matters, the
+  path is to bound the window (until the recovery-flushed tables are compacted
+  away), not to drop the confirmation.
 - `PUT ... ON CONFLICT UPDATE` (upsert) now notifies ghosts and updates the
   record cache, so covering/aggregate ghosts and cached reads reflect an upsert
   without a `REFRESH` (previously stale until refreshed).

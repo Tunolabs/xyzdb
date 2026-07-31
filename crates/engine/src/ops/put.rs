@@ -86,12 +86,58 @@ pub fn execute_put(engine: &Engine, stmt: PutStmt) -> Result<QueryResult> {
     let _anchor_guards = engine.lock_anchor_shards(&dict_keys);
 
     for (anchor_name, val_str, dict_key) in &anchor_keys {
-        if let Some(existing) = engine
+        // The duplicate-anchor check is asymmetric, and that is what makes it cheap
+        // to make safe. A false POSITIVE costs nothing: the bloom produces those by
+        // design, the block is read, the key is not there, and the insert proceeds.
+        // A false NEGATIVE writes a SECOND record under a key that must be unique —
+        // a duplicate ledger entry, in silence, plausibly. The consumer of the
+        // uniqueness guarantee cannot detect it.
+        //
+        // A post-recovery SSTable can carry a bloom that disagrees with its data
+        // (root still open; see the internal bloom analysis), and this point-get is
+        // bloom-gated, so the miss branch is exactly where that defect would turn
+        // into the duplicate. So: only in the window where the defect is reachable —
+        // this process replayed WAL, i.e. the previous run did not shut down
+        // cleanly — confirm a miss WITHOUT the bloom before treating it as "absent".
+        //
+        // Deliberately NOT unconditional: the common case of this check IS a
+        // legitimate miss, so confirming always would pay a full level descent on
+        // every anchored insert, which is precisely what the bloom exists to avoid.
+        // Gating on `recovered_from_wal` makes normal operation cost zero, and it
+        // closes the ledger risk WITHOUT waiting for the root to be diagnosed.
+        let existing = match engine
             .turba
             .dictionary
             .get(dict_key)
             .map_err(|e| XyzError::Storage(format!("dictionary get: {e}")))?
         {
+            Some(v) => Some(v),
+            None if engine.turba.recovered_from_wal() => {
+                let confirmed = engine
+                    .turba
+                    .dictionary
+                    .get_no_bloom(dict_key)
+                    .map_err(|e| XyzError::Storage(format!("dictionary confirm: {e}")))?;
+                if confirmed.is_some() {
+                    // LOUD: the bloom-gated read said absent and the bloom-less read
+                    // found it. Without this confirmation the insert below would have
+                    // duplicated a unique anchor. A hit means the post-recovery bloom
+                    // defect is live in production.
+                    tracing::warn!(
+                        anchor = %anchor_name,
+                        value = %val_str,
+                        lobe = %stmt.lobe,
+                        "duplicate-anchor check: bloom false-negative after crash recovery — \
+                         bloom-gated get missed an anchor that a bloom-less get found; the \
+                         duplicate was PREVENTED by the post-recovery confirmation (see \
+                         recovery-bloom ticket)"
+                    );
+                }
+                confirmed
+            }
+            None => None,
+        };
+        if let Some(existing) = existing {
             // Anchor collision
             if stmt.on_conflict.is_some() {
                 // ON CONFLICT UPDATE — update existing record

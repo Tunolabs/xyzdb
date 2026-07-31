@@ -462,6 +462,7 @@ pub fn serialize_stats_to_prometheus(snapshot: &StatsSnapshot) -> String {
     .ok();
 
     write_invariant_guards(&mut out, &snapshot.invariant_guards);
+    write_recovery_mode(&mut out, snapshot.recovered_from_wal);
 
     out
 }
@@ -531,6 +532,28 @@ fn write_invariant_guards(out: &mut String, g: &xyzdb_engine::stats::InvariantGu
     }
 }
 
+/// Emit the post-recovery armed-mode indicator.
+///
+/// A gauge and not a counter: it describes the CURRENT state of this process, and
+/// it never changes after open. `1` means the previous run did not shut down
+/// cleanly, so anchor misses are being re-confirmed without the bloom for the rest
+/// of this process's life — correct, but a full level descent per anchor miss.
+/// Published so a slow-write incident can be explained instead of guessed.
+fn write_recovery_mode(out: &mut String, recovered: bool) {
+    writeln!(
+        out,
+        "# HELP xyzdb_recovered_from_wal 1 when this process replayed WAL at open (previous run did not shut down cleanly). While 1, anchor misses are re-confirmed bloom-lessly: correct, but a level descent per anchor miss until restart."
+    )
+    .ok();
+    writeln!(out, "# TYPE xyzdb_recovered_from_wal gauge").ok();
+    writeln!(
+        out,
+        "xyzdb_recovered_from_wal {}",
+        if recovered { 1 } else { 0 }
+    )
+    .ok();
+}
+
 #[cfg(test)]
 mod invariant_guard_metrics_tests {
     use super::write_invariant_guards;
@@ -560,6 +583,19 @@ mod invariant_guard_metrics_tests {
             );
         }
         assert!(out.contains("# TYPE xyzdb_invariant_level_overlap_total counter"));
+    }
+
+    #[test]
+    fn recovery_mode_is_published_both_ways() {
+        // Both values must be emitted explicitly: a healthy process publishing a 0
+        // is what lets an operator tell "not in armed mode" from "no data".
+        let mut off = String::new();
+        super::write_recovery_mode(&mut off, false);
+        assert!(off.contains("xyzdb_recovered_from_wal 0"));
+        assert!(off.contains("# TYPE xyzdb_recovered_from_wal gauge"));
+        let mut on = String::new();
+        super::write_recovery_mode(&mut on, true);
+        assert!(on.contains("xyzdb_recovered_from_wal 1"));
     }
 
     #[test]

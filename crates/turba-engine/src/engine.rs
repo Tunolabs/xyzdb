@@ -145,6 +145,31 @@ fn wal_prune_watermark<'a>(trees: impl Iterator<Item = &'a Arc<Tree>>) -> u64 {
         .unwrap_or(0)
 }
 
+/// Test-only override for [`TurbaEngine::recovered_from_wal`]. No-op in production
+/// (nothing sets it); it exists so a test can arm the post-recovery confirmation
+/// without having to manufacture a real unclean crash, and — the part that matters
+/// — so the same test can turn it OFF as a NEGATIVE CONTROL and watch the
+/// unprotected path let a duplicate through. A guard that cannot be shown to be
+/// load-bearing is decoration.
+pub static FORCE_RECOVERED_FROM_WAL: AtomicBool = AtomicBool::new(false);
+
+impl TurbaEngine {
+    /// Whether this process replayed WAL entries at open — i.e. the previous run
+    /// did not shut down cleanly, so the recovery flush ran.
+    ///
+    /// Read by paths that must not tolerate a SILENT point-get miss (the
+    /// duplicate-anchor check above all): inside this window they confirm a miss
+    /// bloom-lessly, outside it they do not pay for the confirmation. See the
+    /// field doc for why the window is the right gate.
+    ///
+    /// # Returns
+    /// `true` when WAL entries were replayed at open, or when the test override
+    /// [`FORCE_RECOVERED_FROM_WAL`] is set.
+    pub fn recovered_from_wal(&self) -> bool {
+        self.recovered_from_wal || FORCE_RECOVERED_FROM_WAL.load(Ordering::Relaxed)
+    }
+}
+
 pub struct TurbaEngine {
     pub spatial: Arc<Tree>,
     pub identity: Arc<Tree>,
@@ -154,6 +179,21 @@ pub struct TurbaEngine {
     /// key. A first-class LSM keyspace identical in treatment to the others.
     pub vectors: Arc<Tree>,
 
+    /// True when this process replayed WAL entries at open, i.e. the previous run
+    /// did NOT shut down cleanly (a graceful shutdown rotates the journal, so a
+    /// clean restart replays nothing).
+    ///
+    /// This is exactly the window in which the recovery flush ran and wrote the
+    /// post-recovery SSTables that the "survivor key vanished" class implicates —
+    /// a bloom-gated point-get can false-negative a key a scan still sees. The
+    /// root of that defect is still open (see the internal analysis), so consumers
+    /// use this flag to arm a cheap confirmation on the read paths where a silent
+    /// miss would be a CORRECTNESS bug rather than a slow answer — most
+    /// importantly the duplicate-anchor check, where a false negative turns an
+    /// idempotent insert into a duplicate record. Outside this window the same
+    /// confirmation would be pure cost, since its common case is a legitimate
+    /// miss; gating on recovery makes it free in normal operation.
+    recovered_from_wal: bool,
     journal: Arc<Mutex<JournalWriter>>,
     seqno: AtomicU64,
     /// Group commit: writers wait here for the sync thread to fsync.
@@ -394,8 +434,13 @@ impl TurbaEngine {
             .unwrap_or(0);
         let start_seqno = max_seqno.max(tree_max);
 
+        // Whether this open replayed WAL entries — the exposure window for the
+        // post-recovery bloom defect. Captured here because this is where the
+        // condition already exists; see the `recovered_from_wal` field doc.
+        let recovered_from_wal = !recovered.is_empty();
+
         // If we recovered data, flush to SSTables and start a fresh journal
-        if !recovered.is_empty() {
+        if recovered_from_wal {
             for tree in [&spatial, &identity, &dictionary, &ghosts, &vectors] {
                 tree.seal_active();
                 tree.flush_sealed()?;
@@ -664,6 +709,7 @@ impl TurbaEngine {
             dictionary,
             ghosts,
             vectors,
+            recovered_from_wal,
             journal,
             seqno: AtomicU64::new(start_seqno),
             group_sync,

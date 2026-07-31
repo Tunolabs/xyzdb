@@ -38,6 +38,21 @@ pub struct StatsSnapshot {
     /// every configuration, including an embedder that never installs a `tracing`
     /// subscriber (where a log-only guard is silent). `0` in a healthy process.
     pub invariant_guards: InvariantGuards,
+    /// `true` when this process replayed WAL at open — i.e. the previous run did
+    /// not shut down cleanly.
+    ///
+    /// **This is a DEGRADED MODE with a price, not a historical note.** Inside it,
+    /// an anchor miss is re-confirmed without the bloom before being trusted, which
+    /// closes the duplicate-anchor exposure a post-recovery bloom can open. The mode
+    /// lasts the whole process lifetime (it cannot be switched off early without
+    /// knowing the defect is gone), so a write-heavy lobe pays a full level descent
+    /// on **every anchor miss** until the next restart. Exposed because otherwise an
+    /// operator sees only slower writes with no way to know why — the same
+    /// "it did not happen vs we did not look" problem as `invariant_guards`, applied
+    /// to cost instead of correctness. If the cost ever bites, the fix is to BOUND
+    /// the window (until the recovery-flushed tables are compacted away), never to
+    /// drop the confirmation — and only with a measurement in hand.
+    pub recovered_from_wal: bool,
 }
 
 /// Engine invariant guards that fired since process start. A guard firing is a

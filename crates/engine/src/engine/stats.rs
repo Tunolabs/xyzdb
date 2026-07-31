@@ -283,6 +283,7 @@ impl Engine {
                 level_overlap: turba_engine::tree::version::level_overlap_violations(),
                 level_overlap_by_keyspace: turba_engine::tree::version::level_overlap_by_keyspace(),
             },
+            recovered_from_wal: self.turba.recovered_from_wal(),
         }
     }
 }
