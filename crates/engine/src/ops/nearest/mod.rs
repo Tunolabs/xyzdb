@@ -357,7 +357,22 @@ fn try_prefix_scan_nearest(
             .map(|p| p as u16)
     });
 
-    let (key_min, key_max) = SpatialKey::prefix_for_gravity(lobe_id, gravity_hash);
+    // Sub-gravity: when the query ALSO pins the lobe's satellite field, narrow
+    // the scoring scan to that satellite sub-range. This is the missing half of
+    // the sub-gravity win for NEAREST: with an Eq on the satellite field the
+    // candidate set IS the satellite, so scoring within it is the exact top-k of
+    // the filtered set (not an approximation) — the whole-bucket score+hydrate
+    // that this query used to pay collapses to the satellite. The residual below
+    // still drops hash16 collisions.
+    let sat = engine.detect_satellite_eq(&scan.lobe, &core_filters);
+    let (key_min, key_max) = match sat {
+        Some(s) => SpatialKey::prefix_for_satellite(lobe_id, gravity_hash, s),
+        None => SpatialKey::prefix_for_gravity(lobe_id, gravity_hash),
+    };
+    // On the satellite path the fused residual is the anti-collision guard; on in
+    // production, droppable only by the SAT_SKIP_ANTICOLLISION_RESIDUAL knob (the
+    // negative control). The plain gravity path keeps the residual unconditional.
+    let apply_residual = sat.is_none() || engine.satellite_residual_active();
 
     // Cosine pruning precompute (lever C): ‖query‖ and its suffix sum-of-squares,
     // built once. Used only for the cosine metric — the Cauchy–Schwarz bound is
@@ -662,8 +677,10 @@ fn try_prefix_scan_nearest(
             // Apply the COMPLETE filter (gravity + residual) in one check: it drops
             // both the residual non-matches AND any hash-collision intruder (a
             // foreign gravity value fails the gravity predicate), so the fused
-            // residual path needs no separate collision guard.
-            if !crate::ops::record_matches_opt_expr(&record, &scan.filter_expr) {
+            // residual path needs no separate collision guard. `apply_residual` is
+            // false only under the satellite negative-control knob, which lets a
+            // hash16 collider leak so the gate can prove the residual earns its keep.
+            if apply_residual && !crate::ops::record_matches_opt_expr(&record, &scan.filter_expr) {
                 continue;
             }
             // The column was not retained (would rebuild the balloon); re-fetch it

@@ -15,11 +15,16 @@ All notable changes to xyzDB are documented here. Format based on [Keep a Change
   only that satellite sub-range instead of the whole bucket. It is a **pure
   optimisation** — same rows, same order as the parent scan — because the read
   path re-applies the field predicate as an anti-collision residual (the 16-bit
-  hash collides by design). One axis per lobe; declared on an empty lobe; a
-  `SET` that changes the field re-places the record (`ON CONFLICT UPDATE` stays
-  in place, like gravity). Records missing the field share satellite 0, so the
-  axis pays only when the field is near-universal in the lobe. See
-  `docs/xytalk-spec.md` §2.2.2.
+  hash collides by design). It also bounds `… | NEAREST(…)`: with an equality on
+  the satellite field the candidate set is the satellite, so NEAREST scores only
+  that sub-range and returns the exact top-k of the filtered set instead of
+  scoring the whole gravity bucket. One axis per lobe; declared on an empty lobe;
+  a `SET` that changes the field re-places the record, but `ON CONFLICT UPDATE`
+  updates in place and does NOT re-place (same as gravity) — so a satellite field
+  that changes via upsert strands the record and its bounded `count` runs short;
+  pick an immutable axis field or mutate with `SET`. Records missing the field
+  share satellite 0, so the axis pays only when the field is near-universal in
+  the lobe. See `docs/xytalk-spec.md` §2.2.2.
 - `NEAREST` responses truncated by the latency airbag (`--nearest-budget-ms`)
   now carry a `budget_stop` object (`examined` / `candidates` / `found`) — the
   counts at the cut, turning the `has_more` inference into a fact. Present ONLY

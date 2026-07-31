@@ -315,3 +315,134 @@ fn set_moves_record_to_new_satellite() {
         "record must NOT remain in the old satellite after SET moved it"
     );
 }
+
+// ─── NEAREST bounded by satellite — the original-ticket query ────────────────
+
+/// Format a float vector as a xyTalk list literal `[f, f, ...]`.
+fn vec_lit(v: &[f32]) -> String {
+    let parts: Vec<String> = v.iter().map(|f| format!("{f:?}")).collect();
+    format!("[{}]", parts.join(", "))
+}
+
+/// The `kind` of each record, in order.
+fn kinds(recs: &[Record]) -> Vec<String> {
+    recs.iter()
+        .map(|r| {
+            r.fields
+                .get("kind")
+                .and_then(|v| v.as_text())
+                .unwrap()
+                .to_string()
+        })
+        .collect()
+}
+
+/// The LID string of each record, in order.
+fn lids(recs: &[Record]) -> Vec<String> {
+    recs.iter().map(|r| r.lid.to_string()).collect()
+}
+
+/// A vector lobe with gravity `scope`, satellite `kind`, searchable `emb`, seeded
+/// so that: 10 `kind = a` records lie at varying (increasing) distance from the
+/// query, and ONE `kind = b` intruder (b collides with a in hash16) has a vector
+/// IDENTICAL to the query — so without the residual it would rank #1. Returns the
+/// query vector.
+fn seeded_vector_engine(a: &str, b: &str) -> (tempfile::TempDir, Engine, Vec<f32>) {
+    const DIM: usize = 8;
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    run(&engine, r#"LOBE "docs""#).unwrap();
+    run(&engine, r#"GRAVITY BY scope IN "docs""#).unwrap();
+    run(&engine, r#"SATELLITE BY kind IN "docs""#).unwrap();
+    run(&engine, r#"VECTOR emb IN "docs""#).unwrap();
+
+    let mut query = vec![0.0f32; DIM];
+    query[0] = 1.0;
+
+    for i in 0..10 {
+        let mut v = vec![0.0f32; DIM];
+        v[0] = 1.0;
+        v[1] = 0.1 * (i as f32 + 1.0); // farther from query as i grows
+        run(
+            &engine,
+            &format!(
+                r#"PUT {{scope: "s1", kind: "{a}", n: {i}, emb: {}}} IN "docs""#,
+                vec_lit(&v)
+            ),
+        )
+        .unwrap();
+    }
+    // Intruder: same gravity bucket, colliding satellite, vector == query.
+    run(
+        &engine,
+        &format!(
+            r#"PUT {{scope: "s1", kind: "{b}", n: 999, emb: {}}} IN "docs""#,
+            vec_lit(&query)
+        ),
+    )
+    .unwrap();
+    (dir, engine, query)
+}
+
+/// NEAREST is bounded to the satellite: `SCAN … WHERE gravity AND kind | NEAREST`
+/// scores only the satellite, so the answer is the exact top-k of the filtered
+/// set — identical (lids and order) to the forced full-bucket path. This is the
+/// query that opened the ticket; it is now bounded, not scoring the whole bucket.
+#[test]
+fn nearest_bounded_equals_parent_route() {
+    let _gate = gate();
+    let (a, b) = find_hash16_collision();
+    let (_dir, engine, query) = seeded_vector_engine(&a, &b);
+    let q = format!(
+        r#"SCAN "docs" WHERE scope = "s1" AND kind = "{a}" | NEAREST(emb, {}, 5, cosine)"#,
+        vec_lit(&query)
+    );
+
+    let bounded = records(&engine, &q);
+    assert_eq!(bounded.len(), 5, "top-5 of the satellite");
+    assert!(
+        kinds(&bounded).iter().all(|k| k == &a),
+        "bounded NEAREST must return only kind={a}, never the colliding intruder"
+    );
+
+    SAT_FORCE_PARENT_SCAN.store(true, Relaxed);
+    let parent = records(&engine, &q);
+    SAT_FORCE_PARENT_SCAN.store(false, Relaxed);
+    assert_eq!(
+        lids(&bounded),
+        lids(&parent),
+        "bounded NEAREST top-k must equal the full-bucket path row for row"
+    );
+}
+
+/// NEAREST negative control: the intruder's vector is identical to the query, so
+/// without the anti-collision residual it ranks #1 and leaks into the top-k. With
+/// the residual (production) it is dropped. Proves the residual is what keeps a
+/// hash16 collider out of the NEAREST answer.
+#[test]
+fn nearest_residual_keeps_collider_out_of_topk() {
+    let _gate = gate();
+    let (a, b) = find_hash16_collision();
+    let (_dir, engine, query) = seeded_vector_engine(&a, &b);
+    let q = format!(
+        r#"SCAN "docs" WHERE scope = "s1" AND kind = "{a}" | NEAREST(emb, {}, 5, cosine)"#,
+        vec_lit(&query)
+    );
+
+    // Production: residual on → no intruder in the top-k.
+    let on = records(&engine, &q);
+    assert!(
+        !kinds(&on).contains(&b),
+        "with the residual, the collider must not appear"
+    );
+
+    // Negative control: residual off → the identical-vector intruder ranks #1.
+    SAT_SKIP_ANTICOLLISION_RESIDUAL.store(true, Relaxed);
+    let off = records(&engine, &q);
+    SAT_SKIP_ANTICOLLISION_RESIDUAL.store(false, Relaxed);
+    assert!(
+        kinds(&off).contains(&b),
+        "negative control: without the residual the closest-vector collider must leak \
+         into the NEAREST top-k"
+    );
+}
