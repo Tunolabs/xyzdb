@@ -119,6 +119,8 @@ pub fn execute_put(engine: &Engine, stmt: PutStmt) -> Result<QueryResult> {
                     .get_no_bloom(dict_key)
                     .map_err(|e| XyzError::Storage(format!("dictionary confirm: {e}")))?;
                 if confirmed.is_some() {
+                    // Count it: this is the defect caught in the act, in production.
+                    ANCHOR_BLOOM_FALSE_NEGATIVES.fetch_add(1, Ordering::Relaxed);
                     // LOUD: the bloom-gated read said absent and the bloom-less read
                     // found it. Without this confirmation the insert below would have
                     // duplicated a unique anchor. A hit means the post-recovery bloom
@@ -567,6 +569,32 @@ fn execute_upsert(
 /// Canonical string form of a value for anchor keys and gravity hashing.
 /// PULL's collision post-filter compares through this same canon so its
 /// equality classes match the write-side `compute_gravity_hash` input.
+/// Times the post-recovery anchor confirmation CONTRADICTED the bloom-gated read:
+/// the bloom said the anchor was absent, the bloom-less re-read found it, and a
+/// duplicate under a UNIQUE key was prevented.
+///
+/// This is not bookkeeping — it is the highest-frequency instrument available for
+/// the post-recovery bloom defect. It fires in PRODUCTION, in the keyspace that
+/// makes the defect consequential (`dictionary`), inside the exact window where it
+/// lives, and it needs no crash to be reproduced: any real unclean restart of any
+/// deployment can trip it. A silent correction would have thrown that away, which
+/// is the same mistake as a log-only invariant guard.
+///
+/// Read via [`anchor_bloom_false_negatives`]; published in the engine's stats so a
+/// zero is data ("did not happen") rather than silence ("did not look").
+static ANCHOR_BLOOM_FALSE_NEGATIVES: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+/// Number of duplicate-anchor inserts prevented by the post-recovery bloom-less
+/// confirmation since process start.
+///
+/// # Returns
+/// The running count. `0` in a process that never recovered, or that recovered and
+/// never met a lying bloom.
+pub fn anchor_bloom_false_negatives() -> u64 {
+    ANCHOR_BLOOM_FALSE_NEGATIVES.load(Ordering::Relaxed)
+}
+
 pub(crate) fn value_to_anchor_string(val: &Value) -> String {
     match val {
         Value::Text(s) => s.clone(),

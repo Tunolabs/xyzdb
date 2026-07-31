@@ -76,6 +76,13 @@ pub struct InvariantGuards {
     /// idempotent insert stops being idempotent), while the same overlap in
     /// `spatial` degrades a record read. Empty in a healthy process.
     pub level_overlap_by_keyspace: BTreeMap<String, u64>,
+    /// Duplicate-anchor inserts PREVENTED by the post-recovery bloom-less
+    /// confirmation — i.e. the bloom claimed a unique anchor was absent and the
+    /// confirmation found it. Non-zero means the post-recovery bloom defect is live
+    /// in this deployment and was caught doing the one thing that would have
+    /// mattered: duplicating a record under a UNIQUE key. See
+    /// `xyzdb_engine::ops::put::anchor_bloom_false_negatives`.
+    pub anchor_bloom_false_negative: u64,
 }
 
 /// Per-component RAM accounting (observability only, v0.6.0-pre). Each

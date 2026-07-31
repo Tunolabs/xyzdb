@@ -305,6 +305,60 @@ pub struct TreeScrubReport {
     pub manifest_ok: bool,
 }
 
+/// Which gate decided a point lookup — the answer to "did the request actually
+/// reach the door this test claims to exercise?".
+///
+/// A test that asserts only on the RESULT can pass without ever touching the gate
+/// it targets. That is not hypothetical: a duplicate-anchor test with a forged
+/// (blinded) bloom passed because reopening replayed the WAL, the key was back in
+/// the active memtable, and `get_at` answers from there BEFORE consulting any
+/// bloom. Green, and never touched the bloom. This enum is how such a test states
+/// its precondition instead of hoping for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LookupGate {
+    /// Answered by the active memtable.
+    ActiveMemtable { tombstone: bool },
+    /// Answered by a sealed (not yet flushed) memtable.
+    SealedMemtable { tombstone: bool },
+    /// Answered by an SSTable at `level`.
+    Table {
+        level: usize,
+        table_id: u64,
+        tombstone: bool,
+    },
+    /// Nothing held the key: every memtable and every consulted table said absent.
+    NotFound,
+}
+
+/// Why a lookup ended where it did, plus the two anomalies worth catching.
+///
+/// Only produced by [`Tree::get_at_traced`]; the untraced path builds none of this
+/// and performs no extra I/O.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LookupTrace {
+    /// The gate that produced the answer.
+    pub decided_by: Option<LookupGate>,
+    /// Levels where the L1+ `binary_search` found no covering table **but a linear
+    /// scan of that level would have**. Non-empty is the smoking gun for an
+    /// unsorted or overlapping L1+ run — the state the engine's own guard warns
+    /// "may silently miss present keys", and historically a cause of exactly this
+    /// symptom that had nothing to do with blooms.
+    pub positional_misses_with_covering_table: Vec<usize>,
+    /// `(level, table_id)` for each table that reported the key ABSENT through the
+    /// bloom-gated read while a bloom-less read of the same table found it — i.e.
+    /// a bloom false negative, caught in the act.
+    pub bloom_false_negatives: Vec<(usize, u64)>,
+}
+
+impl LookupTrace {
+    /// True when the lookup hit no anomaly: no positional miss over a covering
+    /// table, no bloom false negative.
+    pub fn is_clean(&self) -> bool {
+        self.positional_misses_with_covering_table.is_empty()
+            && self.bloom_false_negatives.is_empty()
+    }
+}
+
 impl Tree {
     /// Process-unique identifier assigned at `open()`. Stable for the
     /// lifetime of this `Tree` instance and used as the lookup key into the
@@ -573,25 +627,60 @@ impl Tree {
 
     /// Point lookup at a specific seqno.
     pub fn get_at(&self, user_key: &[u8], visible_seqno: SeqNo) -> Result<Option<Vec<u8>>> {
+        self.get_at_inner(user_key, visible_seqno, None)
+    }
+
+    /// Point lookup that also reports WHICH GATE decided it, plus the two
+    /// anomalies that make a point read miss a key a scan can still see: an L1+
+    /// positional miss over a covering table, and a bloom false negative.
+    ///
+    /// For tests and diagnosis. It shares ONE implementation with [`Self::get_at`]
+    /// — the untraced path passes `None` and is byte-for-byte the same work, with
+    /// no extra I/O — so the traced view can never drift from the real one.
+    ///
+    /// Tracing DOES perform extra reads: on a table-level absent answer it repeats
+    /// the read bloom-lessly to tell "genuinely absent" from "the bloom lied", and
+    /// on an L1+ positional miss it linearly scans that level's bounds. Both are
+    /// exactly the confirmations a diagnosis needs and exactly what production must
+    /// not pay, which is why they live behind this entry point.
+    ///
+    /// # Errors
+    /// Propagates storage errors from the underlying readers.
+    pub fn get_at_traced(
+        &self,
+        user_key: &[u8],
+        visible_seqno: SeqNo,
+    ) -> Result<(Option<Vec<u8>>, LookupTrace)> {
+        let mut trace = LookupTrace::default();
+        let out = self.get_at_inner(user_key, visible_seqno, Some(&mut trace))?;
+        Ok((out, trace))
+    }
+
+    fn get_at_inner(
+        &self,
+        user_key: &[u8],
+        visible_seqno: SeqNo,
+        mut trace: Option<&mut LookupTrace>,
+    ) -> Result<Option<Vec<u8>>> {
         let sv = self.current.load();
 
         // 1. Active memtable
         if let Some((vtype, value)) = sv.active.get(user_key, visible_seqno) {
-            return Ok(if vtype == ValueType::Tombstone {
-                None
-            } else {
-                Some(value)
-            });
+            let tombstone = vtype == ValueType::Tombstone;
+            if let Some(t) = trace.as_deref_mut() {
+                t.decided_by = Some(LookupGate::ActiveMemtable { tombstone });
+            }
+            return Ok(if tombstone { None } else { Some(value) });
         }
 
         // 2. Sealed memtables (newest first)
         for sealed in sv.sealed.iter().rev() {
             if let Some((vtype, value)) = sealed.get(user_key, visible_seqno) {
-                return Ok(if vtype == ValueType::Tombstone {
-                    None
-                } else {
-                    Some(value)
-                });
+                let tombstone = vtype == ValueType::Tombstone;
+                if let Some(t) = trace.as_deref_mut() {
+                    t.decided_by = Some(LookupGate::SealedMemtable { tombstone });
+                }
+                return Ok(if tombstone { None } else { Some(value) });
             }
         }
 
@@ -606,11 +695,18 @@ impl Tree {
                         continue;
                     }
                     if let Some(entry) = table.reader.get(user_key, visible_seqno)? {
-                        return Ok(if entry.value_type == ValueType::Tombstone {
-                            None
-                        } else {
-                            Some(entry.value)
-                        });
+                        let tombstone = entry.value_type == ValueType::Tombstone;
+                        if let Some(t) = trace.as_deref_mut() {
+                            t.decided_by = Some(LookupGate::Table {
+                                level: level_idx,
+                                table_id: table.meta().table_id,
+                                tombstone,
+                            });
+                        }
+                        return Ok(if tombstone { None } else { Some(entry.value) });
+                    }
+                    if let Some(t) = trace.as_deref_mut() {
+                        Self::note_absent_table(t, level_idx, table, user_key, visible_seqno)?;
                     }
                 }
             } else {
@@ -624,19 +720,72 @@ impl Tree {
                         std::cmp::Ordering::Equal
                     }
                 });
-                if let Ok(idx) = pos {
-                    if let Some(entry) = level[idx].reader.get(user_key, visible_seqno)? {
-                        return Ok(if entry.value_type == ValueType::Tombstone {
-                            None
-                        } else {
-                            Some(entry.value)
-                        });
+                match pos {
+                    Ok(idx) => {
+                        if let Some(entry) = level[idx].reader.get(user_key, visible_seqno)? {
+                            let tombstone = entry.value_type == ValueType::Tombstone;
+                            if let Some(t) = trace.as_deref_mut() {
+                                t.decided_by = Some(LookupGate::Table {
+                                    level: level_idx,
+                                    table_id: level[idx].meta().table_id,
+                                    tombstone,
+                                });
+                            }
+                            return Ok(if tombstone { None } else { Some(entry.value) });
+                        }
+                        if let Some(t) = trace.as_deref_mut() {
+                            Self::note_absent_table(
+                                t,
+                                level_idx,
+                                &level[idx],
+                                user_key,
+                                visible_seqno,
+                            )?;
+                        }
+                    }
+                    Err(_) => {
+                        // The positional gate said no table covers this key. If a
+                        // linear pass finds one that does, the level is not the
+                        // sorted, non-overlapping run the search assumes — and the
+                        // key is present but unreachable by a point read.
+                        if let Some(t) = trace.as_deref_mut()
+                            && level.iter().any(|tbl| {
+                                user_key >= tbl.meta().key_min.as_slice()
+                                    && user_key <= tbl.meta().key_max.as_slice()
+                            })
+                        {
+                            t.positional_misses_with_covering_table.push(level_idx);
+                        }
                     }
                 }
             }
         }
 
+        if let Some(t) = trace.as_deref_mut() {
+            t.decided_by = Some(LookupGate::NotFound);
+        }
         Ok(None)
+    }
+
+    /// Record whether a table's "absent" answer was the bloom lying. Trace-only:
+    /// it costs an extra bloom-less read, which production must not pay.
+    fn note_absent_table(
+        trace: &mut LookupTrace,
+        level: usize,
+        table: &version::TableHandle,
+        user_key: &[u8],
+        visible_seqno: SeqNo,
+    ) -> Result<()> {
+        if table
+            .reader
+            .get_no_bloom(user_key, visible_seqno)?
+            .is_some()
+        {
+            trace
+                .bloom_false_negatives
+                .push((level, table.meta().table_id));
+        }
+        Ok(())
     }
 
     /// Point lookup that BYPASSES SSTable bloom filters (block index + data block).

@@ -522,6 +522,25 @@ fn write_invariant_guards(out: &mut String, g: &xyzdb_engine::stats::InvariantGu
         "# TYPE xyzdb_invariant_level_overlap_by_keyspace_total counter"
     )
     .ok();
+    // The anchor confirmation is itself a detector: when it fires, the defect was
+    // caught in production, in the keyspace where it duplicates records. Publish the
+    // count so a correction is never silent.
+    writeln!(
+        out,
+        "# HELP xyzdb_invariant_anchor_bloom_false_negative_total Duplicate-anchor inserts prevented by the post-recovery bloom-less confirmation (non-zero = the post-recovery bloom defect is live here)."
+    )
+    .ok();
+    writeln!(
+        out,
+        "# TYPE xyzdb_invariant_anchor_bloom_false_negative_total counter"
+    )
+    .ok();
+    writeln!(
+        out,
+        "xyzdb_invariant_anchor_bloom_false_negative_total {}",
+        g.anchor_bloom_false_negative
+    )
+    .ok();
     for ks in ["spatial", "identity", "dictionary", "ghosts", "vectors"] {
         let n = g.level_overlap_by_keyspace.get(ks).copied().unwrap_or(0);
         writeln!(
@@ -568,6 +587,7 @@ mod invariant_guard_metrics_tests {
             &InvariantGuards {
                 level_overlap: 0,
                 level_overlap_by_keyspace: BTreeMap::new(),
+                anchor_bloom_false_negative: 0,
             },
         );
         assert!(out.contains("xyzdb_invariant_level_overlap_total 0"));
@@ -583,6 +603,7 @@ mod invariant_guard_metrics_tests {
             );
         }
         assert!(out.contains("# TYPE xyzdb_invariant_level_overlap_total counter"));
+        assert!(out.contains("xyzdb_invariant_anchor_bloom_false_negative_total 0"));
     }
 
     #[test]
@@ -608,6 +629,7 @@ mod invariant_guard_metrics_tests {
             &InvariantGuards {
                 level_overlap: 2,
                 level_overlap_by_keyspace: by_ks,
+                anchor_bloom_false_negative: 7,
             },
         );
         assert!(out.contains("xyzdb_invariant_level_overlap_total 2"));
@@ -618,5 +640,6 @@ mod invariant_guard_metrics_tests {
         assert!(
             out.contains("xyzdb_invariant_level_overlap_by_keyspace_total{keyspace=\"spatial\"} 0")
         );
+        assert!(out.contains("xyzdb_invariant_anchor_bloom_false_negative_total 7"));
     }
 }

@@ -147,14 +147,17 @@ def assert_no_invariant_guards(host: str, port: int, phase: str) -> dict:
     """Read the guards and FAIL the phase if any fired. Returns the dict so the
     caller can publish it as part of the cell's conditions."""
     guards = read_invariant_guards(host, port)
-    total = guards.get("level_overlap", 0)
-    if total:
+    # Generic over EVERY numeric counter the engine exposes, not just the one that
+    # existed when this was written: a new guard must fail the cell the day it
+    # ships, without anyone remembering to extend this list.
+    fired = {k: v for k, v in guards.items() if isinstance(v, int) and v}
+    if fired:
         raise InvariantGuardFired(
-            f"{phase}: engine invariant guard fired {total}x "
-            f"(by keyspace: {guards.get('level_overlap_by_keyspace')}). "
-            "An overlapping L1+ run breaks the read path's binary search, so "
-            "point reads can silently miss present keys. The number from this "
-            "cell is not publishable."
+            f"{phase}: engine invariant guard(s) fired {fired} "
+            f"(full guards: {guards}). Any non-zero here is a correctness signal — "
+            "an overlapping L1+ run makes point reads miss present keys, and a "
+            "prevented duplicate anchor means the post-recovery bloom defect is "
+            "live in this run. The number from this cell is not publishable."
         )
     return guards
 

@@ -32,6 +32,7 @@ use std::sync::atomic::Ordering::Relaxed;
 use turba_engine::engine::FORCE_RECOVERED_FROM_WAL;
 use turba_engine::table::meta::{FOOTER_SIZE_V2, Footer};
 use xyzdb_engine::engine::{Engine, QueryResult};
+use xyzdb_engine::ops::put::anchor_bloom_false_negatives;
 
 /// `FORCE_RECOVERED_FROM_WAL` is process-global, so these two tests must not
 /// interleave: one arming while the other expects the unarmed path would make the
@@ -137,6 +138,7 @@ fn armed_after_recovery_the_duplicate_anchor_is_still_caught() {
     let dir = tempfile::tempdir().unwrap();
     let engine = engine_with_blinded_anchor_bloom(dir.path());
 
+    let caught_before = anchor_bloom_false_negatives();
     FORCE_RECOVERED_FROM_WAL.store(true, Relaxed);
     let err = run(&engine, r#"PUT {txid: "TX-1", amount: 999} IN "ledger""#)
         .expect_err("the duplicate anchor must be refused even with a blinded bloom");
@@ -156,6 +158,16 @@ fn armed_after_recovery_the_duplicate_anchor_is_still_caught() {
         .filter(|r| r.fields.get("txid").and_then(|v| v.as_text()) == Some("TX-1"))
         .count();
     assert_eq!(tx1, 1, "exactly one TX-1 must exist, found {tx1}");
+
+    // The armouring is also a DETECTOR, and a detector that corrects in silence
+    // throws away the only high-frequency evidence of this defect there is: it
+    // fires in production, in `dictionary`, inside the window where the defect
+    // lives, with no crash to reproduce. So the catch must be COUNTED.
+    assert_eq!(
+        anchor_bloom_false_negatives(),
+        caught_before + 1,
+        "the prevented duplicate must be counted, not silently corrected"
+    );
 }
 
 /// NEGATIVE CONTROL — unarmed (no recovery window): the same forged state lets the
@@ -170,6 +182,7 @@ fn unarmed_the_blinded_bloom_lets_a_duplicate_anchor_through() {
     let engine = engine_with_blinded_anchor_bloom(dir.path());
 
     // Not armed: the miss is trusted, exactly as it was before this change.
+    let caught_before = anchor_bloom_false_negatives();
     FORCE_RECOVERED_FROM_WAL.store(false, Relaxed);
     run(&engine, r#"PUT {txid: "TX-1", amount: 999} IN "ledger""#)
         .expect("unarmed, the blinded bloom makes the duplicate look absent");
@@ -188,5 +201,11 @@ fn unarmed_the_blinded_bloom_lets_a_duplicate_anchor_through() {
         "negative control: unarmed, the unique anchor must have been DUPLICATED \
          (found {tx1}). If this is 1, the armouring is not what catches the \
          duplicate and the armed test proves nothing."
+    );
+    assert_eq!(
+        anchor_bloom_false_negatives(),
+        caught_before,
+        "unarmed, nothing was caught, so the counter must not move — otherwise a \
+         non-zero count would not mean what the stats field claims it means"
     );
 }

@@ -282,6 +282,7 @@ impl Engine {
             invariant_guards: crate::stats::InvariantGuards {
                 level_overlap: turba_engine::tree::version::level_overlap_violations(),
                 level_overlap_by_keyspace: turba_engine::tree::version::level_overlap_by_keyspace(),
+                anchor_bloom_false_negative: crate::ops::put::anchor_bloom_false_negatives(),
             },
             recovered_from_wal: self.turba.recovered_from_wal(),
         }
