@@ -63,7 +63,7 @@ fn flush_without_manifest(dir: &Path, keys: &[&str]) {
     let tree = open(dir);
     tree.set_compaction_enabled(false);
     for k in keys {
-        tree.insert(k.as_bytes(), b"v");
+        tree.insert(k.as_bytes(), b"v").expect("write");
     }
     tree.seal_active();
     tree.flush_sealed().expect("flush");
@@ -109,7 +109,8 @@ fn a_clean_reopen_does_not_advance_the_id() {
     {
         let tree = open(path);
         for i in 0..50 {
-            tree.insert(format!("k{i:04}").as_bytes(), b"v");
+            tree.insert(format!("k{i:04}").as_bytes(), b"v")
+                .expect("write");
         }
         tree.seal_active();
         tree.flush_sealed().expect("flush"); // compaction enabled ⇒ manifest persisted
@@ -121,7 +122,7 @@ fn a_clean_reopen_does_not_advance_the_id() {
     // exactly one past the highest existing one rather than jumping.
     {
         let tree = open(path);
-        tree.insert(b"tail", b"v");
+        tree.insert(b"tail", b"v").expect("write");
         tree.seal_active();
         tree.flush_sealed().expect("flush");
     }
