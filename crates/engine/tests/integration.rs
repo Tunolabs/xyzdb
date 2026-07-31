@@ -3926,6 +3926,7 @@ fn assert_paginated(
             records,
             cursor,
             has_more,
+            ..
         } => (records.clone(), cursor.clone(), *has_more),
         other => panic!("Expected PaginatedRecords, got: {other:?}"),
     }
@@ -4599,6 +4600,7 @@ fn cursor_exactly_once_across_compaction() {
                 records,
                 cursor,
                 has_more,
+                ..
             } => (records, cursor, has_more),
             QueryResult::Records(records) => (records, None, false),
             other => panic!("unexpected scan result: {other:?}"),

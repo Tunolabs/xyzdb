@@ -29,9 +29,9 @@ pub fn execute_pipeline(engine: &Engine, steps: Vec<PipelineStep>) -> Result<Que
             PipelineStep::Nearest(nearest_stmt),
         ] = &steps[..]
     {
-        let (records, truncated) =
+        let (records, budget_stop) =
             crate::ops::nearest::execute_scan_nearest(engine, scan_stmt.clone(), nearest_stmt)?;
-        if truncated {
+        if budget_stop.is_some() {
             // Budget cut the score-ordered hydration: `records` are the
             // highest-scoring passers found within budget — a prefix-correct
             // partial, NOT an arbitrary sample. Surface it via the existing
@@ -39,10 +39,13 @@ pub fn execute_pipeline(engine: &Engine, steps: Vec<PipelineStep>) -> Result<Que
             // NEAREST has no resumable page (resuming would repeat the whole
             // scoring pass), so the flag is a plain "these are the best found,
             // more lower-scoring ones may exist" — deliberately no SCAN cursor.
+            // `budget_stop` carries examined/candidates/found — this is the ONLY
+            // site that fills it (the only path that truncates on the airbag).
             return Ok(QueryResult::PaginatedRecords {
                 records,
                 cursor: None,
                 has_more: true,
+                budget_stop,
             });
         }
         return Ok(QueryResult::Records(records));

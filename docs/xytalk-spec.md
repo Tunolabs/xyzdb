@@ -344,6 +344,8 @@ For a casual reader's view of how the engine picks the path automatically, see t
 
 `LIMIT` without `CURSOR` on a gravity-eligible predicate triggers the first-page paginated path automatically: the response is `PaginatedRecords` with a fresh cursor and `has_more`. Subsequent calls pass the cursor back unchanged. Anchor and FIND-LID shapes ignore `LIMIT` (single record returned regardless).
 
+A `NEAREST` whose bounded hydration was cut by the latency airbag (`--nearest-budget-ms`) also returns `PaginatedRecords` with `has_more = true` but **no cursor** — its scoring pass is not resumable. In that one case the frame additionally carries `budget_stop: { examined, candidates, found }` — the counts at the cut, defined and interpreted in §2.20. The field is **absent on every other** `PaginatedRecords` (cursor pages, SCAN caps), so those frames stay byte-identical and clients that key off `has_more` are unaffected.
+
 #### 2.5.1 FETCH — Multi-lobe co-located read (v1)
 
 ```
@@ -993,6 +995,20 @@ SCAN "memories" WHERE topic = "billing"
 - The engine **never embeds**: the caller supplies the query vector (`$q`, an inline list, or `REF "id"`), embedded with the same model the corpus used. No network call happens on any path.
 - Internally a fused `Scan`+`Nearest` fast path ranks candidates from the cheap on-disk vector prefix / `vectors` column (not the full record blobs) and hydrates only the surviving top-k — bit-identical to the unfused path. See `docs/architecture.md` §3.7.
 - **Result shape and the latency wall.** `NEAREST` returns plain `QueryResult::Records` for a complete answer — whether that is a full top-`k` or a complete-but-short set (fewer than `k` rows pass a residual filter). A wall-clock safety budget bounds how long a single query runs; it is a **latency** wall, never a recall wall. If it expires while hydrating a very selective residual (matches must be found by descending the bucket in score order), the engine does **not** fail — it returns the highest-scoring passers found so far as `QueryResult::PaginatedRecords { has_more: true, cursor: None }`. This partial is **prefix-correct** (an exact prefix of the true ranking, not an arbitrary sample) and carries **no cursor** — unlike SCAN pagination, a `NEAREST` truncation is not resumable, since resuming would repeat the whole scoring pass. Read `has_more` as "these are the best found within budget; more, lower-scoring matches may exist".
+
+That truncated frame additionally carries a `budget_stop` object with three counts taken at the cut:
+
+| Field | Meaning |
+|---|---|
+| `candidates` | The whole **scored** set in score order (the bucket), *before* the residual filter. NOT the number of filter matches. |
+| `examined` | How many of those candidates had their residual filter **checked** (were hydrated) before the budget expired. Counts passers and non-passers alike. |
+| `found` | How many **passed** — the prefix-correct survivors returned. Equal to `records.len()` by construction. |
+
+Read them as one sentence: *"scored `candidates`, checked the filter on `examined` of them, `found` passed."* In the selective case that motivates the airbag, almost none of the scored candidates pass — e.g. `{ examined: 238000, candidates: 246000, found: 6 }` reads "scored 246k, checked 238k, 6 passed", **not** "246k matched".
+
+Two derived quantities are the point of the trio. `examined / candidates` is the fraction of the scored universe actually checked; `found / examined` is the filter's observed pass rate over that checked portion. A client seeing 6 passers in 238k checked can extrapolate a fraction of a row across the ~8k unchecked and upgrade "there may be more" to "almost certainly not" — an inference the client draws, not a claim the engine makes.
+
+The object describes the **cut, not the set**. `examined` is what was checked, not what exists; and because there is no cursor, `candidates - examined` is **not** "the remainder, request it" — those candidates are unchecked, not pending, and there is no call that returns them. The only responses to a `budget_stop` are: raise `--nearest-budget-ms`, narrow the query scope, or accept the partial. `budget_stop` is present **only** on this truncated NEAREST frame; every other `PaginatedRecords` omits it, so ordinary pagination frames are byte-identical to before it existed.
 
 ---
 

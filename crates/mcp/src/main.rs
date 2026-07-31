@@ -1425,6 +1425,7 @@ mod tests {
                 records: vec![],
                 cursor: None,
                 has_more: false,
+                budget_stop: None,
             }),
             0
         );

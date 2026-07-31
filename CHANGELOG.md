@@ -6,8 +6,17 @@ All notable changes to xyzDB are documented here. Format based on [Keep a Change
 
 ## [Unreleased]
 
-Nothing yet. New changes land here; the maintainer assigns them to a release when
-it is cut.
+### Added
+- `NEAREST` responses truncated by the latency airbag (`--nearest-budget-ms`)
+  now carry a `budget_stop` object (`examined` / `candidates` / `found`) — the
+  counts at the cut, turning the `has_more` inference into a fact. Present ONLY
+  on that truncation frame; every other `PaginatedRecords` (cursor pages, SCAN
+  caps) stays byte-identical, so `has_more`-based clients are unaffected.
+
+### Fixed
+- `PUT ... ON CONFLICT UPDATE` (upsert) now notifies ghosts and updates the
+  record cache, so covering/aggregate ghosts and cached reads reflect an upsert
+  without a `REFRESH` (previously stale until refreshed).
 
 ## [1.0.0] — 2026-07-30 (1.0 launch)
 

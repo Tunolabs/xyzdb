@@ -41,6 +41,7 @@ fn gravity_scan_over_cap_signals_has_more() {
             records,
             has_more,
             cursor,
+            ..
         } => {
             assert_eq!(
                 records.len(),
@@ -103,6 +104,7 @@ fn ghost_routed_scan_over_cap_signals_has_more() {
             records,
             has_more,
             cursor,
+            ..
         } => {
             assert_eq!(
                 records.len(),

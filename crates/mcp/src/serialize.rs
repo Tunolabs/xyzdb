@@ -86,6 +86,7 @@ pub fn query_result_to_json(result: &QueryResult, elapsed_ms: f64) -> JsonValue 
             records,
             cursor,
             has_more,
+            budget_stop,
         } => {
             let json_records: Vec<JsonValue> = records.iter().map(record_to_json).collect();
             let mut obj = serde_json::Map::new();
@@ -93,6 +94,18 @@ pub fn query_result_to_json(result: &QueryResult, elapsed_ms: f64) -> JsonValue 
             obj.insert("records".into(), JsonValue::Array(json_records));
             obj.insert("count".into(), json!(records.len()));
             obj.insert("has_more".into(), json!(has_more));
+            // M2.3 budget-stop fact — present only on a NEAREST truncated by the
+            // airbag; absent otherwise (additive, existing frames unchanged).
+            if let Some(bs) = budget_stop {
+                obj.insert(
+                    "budget_stop".into(),
+                    json!({
+                        "examined": bs.examined,
+                        "candidates": bs.candidates,
+                        "found": bs.found,
+                    }),
+                );
+            }
             if let Some(token) = cursor {
                 obj.insert("cursor".into(), json!(token));
             } else {
@@ -223,6 +236,7 @@ mod tests {
             records: vec![sample_record()],
             cursor: Some("AQEAAQ_DUMMY".into()),
             has_more: true,
+            budget_stop: None,
         };
         let v = query_result_to_json(&qr, 9.9);
         assert_eq!(v["status"], "ok");
@@ -237,6 +251,7 @@ mod tests {
             records: vec![sample_record()],
             cursor: None,
             has_more: false,
+            budget_stop: None,
         };
         let v = query_result_to_json(&qr, 1.0);
         assert_eq!(v["cursor"], JsonValue::Null);

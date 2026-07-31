@@ -637,11 +637,21 @@ fn m23_budget_cut_degrades_to_prefix_not_err() {
             records,
             cursor,
             has_more,
+            budget_stop,
         } => {
             assert!(has_more, "a budget-truncated NEAREST sets has_more");
             assert!(
                 cursor.is_none(),
                 "NEAREST truncation carries NO cursor (not resumable)"
+            );
+            // M2.3 flag (fill-path, deterministic here): a budget stop carries the
+            // counters, turning "there may be more" into "examined E of C, found F".
+            let bs = budget_stop.expect("budget-truncated NEAREST must carry budget_stop");
+            assert_eq!(bs.found, records.len(), "found == records returned");
+            assert!(bs.candidates >= bs.found, "candidates >= found: {bs:?}");
+            assert!(
+                bs.examined >= bs.found && bs.examined <= bs.candidates,
+                "examined in [found, candidates]: {bs:?}"
             );
             let ids: Vec<String> = records
                 .iter()

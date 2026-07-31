@@ -105,6 +105,7 @@ fn try_first_page_paginated(engine: &Engine, stmt: &FindStmt) -> Result<Option<Q
         records: out.records,
         cursor: new_cursor,
         has_more: out.has_more,
+        budget_stop: None, // FIND never runs the NEAREST hydration airbag
     }))
 }
 
@@ -221,6 +222,7 @@ fn execute_find_paginated(engine: &Engine, stmt: &FindStmt) -> Result<QueryResul
         records: out.records,
         cursor: new_cursor,
         has_more: out.has_more,
+        budget_stop: None, // FIND never runs the NEAREST hydration airbag
     })
 }
 

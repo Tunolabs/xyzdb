@@ -448,6 +448,7 @@ fn execute_scan_inner(engine: &Engine, stmt: ScanStmt, cap: ScanCap) -> Result<S
             records,
             cursor,
             has_more,
+            budget_stop: None, // SCAN cap / cursor page, not a NEAREST budget stop
         },
         None => QueryResult::Records(records),
     };
@@ -1562,6 +1563,7 @@ fn execute_cursor_scan(
             records: out.records,
             cursor: new_cursor,
             has_more: out.has_more,
+            budget_stop: None, // cursor-resumed SCAN page, not a NEAREST budget stop
         },
         auto_ghost: None,
     })

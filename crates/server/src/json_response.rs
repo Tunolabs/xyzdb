@@ -81,6 +81,7 @@ pub fn serialize_json(
             records,
             cursor,
             has_more,
+            budget_stop,
         } => {
             // v0.2.5.1: paginated SCAN — same record schema as the flat
             // `records` shape, with extra `cursor` (opaque token, present
@@ -94,6 +95,19 @@ pub fn serialize_json(
             obj.insert("records".into(), JsonValue::Array(json_records));
             obj.insert("count".into(), json!(records.len()));
             obj.insert("has_more".into(), json!(has_more));
+            // M2.3: the budget-stop fact, emitted ONLY when present (a NEAREST
+            // whose hydration hit the airbag). Absent otherwise, so ordinary
+            // pagination frames stay byte-identical — additive, PATCH-safe.
+            if let Some(bs) = budget_stop {
+                obj.insert(
+                    "budget_stop".into(),
+                    json!({
+                        "examined": bs.examined,
+                        "candidates": bs.candidates,
+                        "found": bs.found,
+                    }),
+                );
+            }
             if let Some(token) = cursor {
                 obj.insert("cursor".into(), json!(token));
             } else {
@@ -295,5 +309,55 @@ fn error_code(error: &str) -> &'static str {
         "THROTTLED"
     } else {
         "INTERNAL_ERROR"
+    }
+}
+
+#[cfg(test)]
+mod budget_stop_wire {
+    //! M2.3 flag wire contract: `budget_stop` is emitted ONLY when present (a
+    //! NEAREST truncated by the latency airbag) and ABSENT otherwise, so ordinary
+    //! pagination frames stay byte-identical — the additive guarantee that keeps
+    //! existing clients (devva `clean_page` keys off `has_more`) working untouched.
+    use super::*;
+    use std::time::Duration;
+    use xyzdb_core::result::BudgetStop;
+
+    fn json_of(qr: &QueryResult) -> JsonValue {
+        serde_json::from_slice(&serialize_json(qr, Duration::from_millis(1), false, None)).unwrap()
+    }
+
+    #[test]
+    fn budget_stop_present_and_shaped_when_some() {
+        let j = json_of(&QueryResult::PaginatedRecords {
+            records: vec![],
+            cursor: None,
+            has_more: true,
+            budget_stop: Some(BudgetStop {
+                examined: 238_000,
+                candidates: 246_000,
+                found: 6,
+            }),
+        });
+        assert_eq!(j["has_more"], json!(true));
+        assert_eq!(j["budget_stop"]["examined"], json!(238_000));
+        assert_eq!(j["budget_stop"]["candidates"], json!(246_000));
+        assert_eq!(j["budget_stop"]["found"], json!(6));
+    }
+
+    #[test]
+    fn budget_stop_absent_when_none() {
+        // Ordinary cursor page: has_more present, budget_stop key ABSENT.
+        let j = json_of(&QueryResult::PaginatedRecords {
+            records: vec![],
+            cursor: Some("tok".into()),
+            has_more: true,
+            budget_stop: None,
+        });
+        assert_eq!(j["has_more"], json!(true));
+        assert_eq!(j["cursor"], json!("tok"));
+        assert!(
+            j.get("budget_stop").is_none(),
+            "budget_stop must be absent (not null) when None, for byte-identical frames"
+        );
     }
 }

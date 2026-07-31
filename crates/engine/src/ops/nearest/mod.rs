@@ -225,9 +225,9 @@ pub fn execute_scan_nearest(
     engine: &Engine,
     scan: ScanStmt,
     nearest: &NearestStmt,
-) -> Result<(Vec<Record>, bool)> {
-    if let Some((records, truncated)) = try_prefix_scan_nearest(engine, &scan, nearest)? {
-        return Ok((records, truncated));
+) -> Result<(Vec<Record>, Option<xyzdb_core::result::BudgetStop>)> {
+    if let Some((records, budget_stop)) = try_prefix_scan_nearest(engine, &scan, nearest)? {
+        return Ok((records, budget_stop));
     }
     // Fallback (M2.1): the full path, but the feeding SCAN is decoupled from the
     // default cap so an exact top-k sees the WHOLE gravity bucket (no recall
@@ -258,7 +258,9 @@ pub fn execute_scan_nearest(
             metric: nearest.metric.clone(),
         },
     )?;
-    Ok((records, false))
+    // The fallback is an exact, complete answer — it never truncates, so no
+    // budget_stop signal.
+    Ok((records, None))
 }
 
 /// Attempt the fused fast path (V5 column-primary, V3/V4 prefix fallback).
@@ -275,7 +277,7 @@ fn try_prefix_scan_nearest(
     engine: &Engine,
     scan: &ScanStmt,
     nearest: &NearestStmt,
-) -> Result<Option<(Vec<Record>, bool)>> {
+) -> Result<Option<(Vec<Record>, Option<xyzdb_core::result::BudgetStop>)>> {
     // Rule: lobe declares a searchable vector AND nearest.field == that field.
     let Some(spec) = engine.get_vector_spec(&scan.lobe) else {
         return Ok(None);
@@ -333,7 +335,7 @@ fn try_prefix_scan_nearest(
 
     let k = nearest.k as usize;
     if k == 0 {
-        return Ok(Some((Vec::new(), false)));
+        return Ok(Some((Vec::new(), None)));
     }
 
     // Resolve the query field's id once, so per-record prefixes can be matched
@@ -587,6 +589,12 @@ fn try_prefix_scan_nearest(
     // legitimate small answer must never become an Err. The airbag stays a latency
     // wall (it bounds wall-clock), never a recall wall (it never fails a query).
     let mut hydration_truncated = false;
+    // M2.3 budget_stop counters: `candidates` = the whole score-ordered set;
+    // `examined` counts ONLY the hydration tail (not the scoring pass, whose
+    // `scanned` is shared), so "examined E of C" reads as "hydrated E of C
+    // scored". Surfaced only when the airbag actually cuts (below).
+    let candidates = cands.len();
+    let mut examined = 0usize;
     for c in cands {
         if has_residual && out.len() == k {
             break; // k winners found — stop hydrating (the whole point).
@@ -603,6 +611,7 @@ fn try_prefix_scan_nearest(
             hydration_truncated = true;
             break;
         }
+        examined += 1;
         // `range_stream` (the bloom-less scan path) just yielded this key, so it IS
         // live. The bloom-gated point-get should find it — EXCEPT after an unclean
         // crash, where a post-recovery SSTable can carry a bloom that disagrees with
@@ -678,7 +687,15 @@ fn try_prefix_scan_nearest(
         out.push(record);
     }
     drop(fr_guard);
-    Ok(Some((out, hydration_truncated)))
+    // budget_stop is Some ONLY when the airbag cut the hydration tail — the one
+    // case where `has_more=true` is a budget stop, not a resumable page. Turns
+    // "there may be more" into "examined E of C candidates, found F".
+    let budget_stop = hydration_truncated.then(|| xyzdb_core::result::BudgetStop {
+        examined,
+        candidates,
+        found: out.len(),
+    });
+    Ok(Some((out, budget_stop)))
 }
 
 /// Cheap top-k heap entry for the fused fast path: the similarity score, the

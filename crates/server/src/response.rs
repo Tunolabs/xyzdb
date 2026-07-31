@@ -58,6 +58,7 @@ pub fn format_result(result: &QueryResult) -> String {
             records,
             cursor,
             has_more,
+            budget_stop,
         } => {
             // v0.2.5.1: paginated SCAN. Render the page with the same record
             // box format used by `Records`, then append a footer line so a
@@ -77,6 +78,12 @@ pub fn format_result(result: &QueryResult) -> String {
                 s
             };
             out.push_str(&format!("\nhas_more: {has_more}"));
+            if let Some(bs) = budget_stop {
+                out.push_str(&format!(
+                    "\nbudget_stop: examined {} of {} candidates, found {}",
+                    bs.examined, bs.candidates, bs.found
+                ));
+            }
             if let Some(token) = cursor {
                 out.push_str(&format!("\ncursor: {token}"));
             }
