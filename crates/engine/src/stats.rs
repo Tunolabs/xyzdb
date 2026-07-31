@@ -30,6 +30,37 @@ pub struct StatsSnapshot {
     /// Per-component RAM accounting + ratio against `process.vmrss_bytes`.
     /// Pure observability; no enforcement.
     pub ram_budget: RamBudgetSnapshot,
+    /// Count of engine invariant guards that have fired in this process.
+    ///
+    /// **Not observability — a correctness signal.** Any non-zero value means a
+    /// state the read path assumes as impossible was observed; see
+    /// [`InvariantGuards`]. Surfaced here so the invariant is visible as STATE in
+    /// every configuration, including an embedder that never installs a `tracing`
+    /// subscriber (where a log-only guard is silent). `0` in a healthy process.
+    pub invariant_guards: InvariantGuards,
+}
+
+/// Engine invariant guards that fired since process start. A guard firing is a
+/// bug in the engine, not a recoverable condition — these counters exist so the
+/// bug is *observable* rather than dependent on the caller's logging plumbing.
+///
+/// Never reset, never decrease. A harness should FAIL a run in which any of these
+/// is non-zero: asserting on a counter is robust where scraping a log is not
+/// (filter level, format, and buffering around a process about to die).
+#[derive(Debug, Serialize)]
+pub struct InvariantGuards {
+    /// L1+ non-overlap violations. A level whose runs overlap breaks `get_at`'s
+    /// per-level binary search, so **point reads can silently miss keys that a
+    /// scan still finds** — historically the exact shape of the "survivor key
+    /// vanished" class. Source: `turba_engine::tree::version`.
+    pub level_overlap: u64,
+    /// Which keyspace the overlaps happened in (`spatial`, `identity`,
+    /// `dictionary`, `ghosts`, `vectors`). The total says *whether*; this says
+    /// *where*, and the keyspace decides the blast radius: an overlap in
+    /// `dictionary` can make a duplicate-anchor check miss a duplicate (an
+    /// idempotent insert stops being idempotent), while the same overlap in
+    /// `spatial` degrades a record read. Empty in a healthy process.
+    pub level_overlap_by_keyspace: BTreeMap<String, u64>,
 }
 
 /// Per-component RAM accounting (observability only, v0.6.0-pre). Each

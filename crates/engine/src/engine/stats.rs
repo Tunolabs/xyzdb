@@ -279,6 +279,10 @@ impl Engine {
             cgroup,
             scheduler,
             ram_budget,
+            invariant_guards: crate::stats::InvariantGuards {
+                level_overlap: turba_engine::tree::version::level_overlap_violations(),
+                level_overlap_by_keyspace: turba_engine::tree::version::level_overlap_by_keyspace(),
+            },
         }
     }
 }

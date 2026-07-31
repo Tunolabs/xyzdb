@@ -461,6 +461,8 @@ pub fn serialize_stats_to_prometheus(snapshot: &StatsSnapshot) -> String {
     )
     .ok();
 
+    write_invariant_guards(&mut out, &snapshot.invariant_guards);
+
     out
 }
 
@@ -477,4 +479,108 @@ fn escape_label(s: &str) -> String {
         }
     }
     out
+}
+
+/// Emit the invariant-guard counters in Prometheus exposition format.
+///
+/// Split out of [`serialize_stats_to_prometheus`] so the emission has a unit test
+/// without building a whole [`StatsSnapshot`] (9 nested structs, no `Default`).
+/// The risk this covers is the format and, above all, that a **zero is emitted
+/// explicitly**: an absent series is indistinguishable from a scrape gap, which
+/// would turn "no violation" back into silence.
+fn write_invariant_guards(out: &mut String, g: &xyzdb_engine::stats::InvariantGuards) {
+    // ─── Invariant guards — correctness signal, not observability ─────────
+    // An engine invariant that fired. Non-zero is a bug to page on, not a
+    // capacity metric: an overlapping L1+ run breaks the read path's binary
+    // search, so point reads can silently miss keys a scan still finds.
+    // Exported so the ABSENCE of violations is published data ("0") rather
+    // than silence — the difference between "it did not happen" and "we did
+    // not look".
+    writeln!(
+        out,
+        "# HELP xyzdb_invariant_level_overlap_total L1+ non-overlap invariant violations since start (0 = healthy; non-zero is an engine bug)."
+    )
+    .ok();
+    writeln!(out, "# TYPE xyzdb_invariant_level_overlap_total counter").ok();
+    writeln!(
+        out,
+        "xyzdb_invariant_level_overlap_total {}",
+        g.level_overlap
+    )
+    .ok();
+    // Per-keyspace breakdown: says WHERE, which sets the blast radius.
+    // Always emit every known keyspace so a zero is explicit rather than a
+    // missing series (an absent series is indistinguishable from a scrape gap).
+    writeln!(
+        out,
+        "# HELP xyzdb_invariant_level_overlap_by_keyspace_total L1+ overlap violations per keyspace."
+    )
+    .ok();
+    writeln!(
+        out,
+        "# TYPE xyzdb_invariant_level_overlap_by_keyspace_total counter"
+    )
+    .ok();
+    for ks in ["spatial", "identity", "dictionary", "ghosts", "vectors"] {
+        let n = g.level_overlap_by_keyspace.get(ks).copied().unwrap_or(0);
+        writeln!(
+            out,
+            "xyzdb_invariant_level_overlap_by_keyspace_total{{keyspace=\"{ks}\"}} {n}"
+        )
+        .ok();
+    }
+}
+
+#[cfg(test)]
+mod invariant_guard_metrics_tests {
+    use super::write_invariant_guards;
+    use std::collections::BTreeMap;
+    use xyzdb_engine::stats::InvariantGuards;
+
+    #[test]
+    fn healthy_process_publishes_explicit_zeros() {
+        let mut out = String::new();
+        write_invariant_guards(
+            &mut out,
+            &InvariantGuards {
+                level_overlap: 0,
+                level_overlap_by_keyspace: BTreeMap::new(),
+            },
+        );
+        assert!(out.contains("xyzdb_invariant_level_overlap_total 0"));
+        // Every keyspace must appear with an explicit 0 — a MISSING series reads
+        // like a scrape gap, which is exactly the silence this counter exists to
+        // remove.
+        for ks in ["spatial", "identity", "dictionary", "ghosts", "vectors"] {
+            assert!(
+                out.contains(&format!(
+                    "xyzdb_invariant_level_overlap_by_keyspace_total{{keyspace=\"{ks}\"}} 0"
+                )),
+                "keyspace {ks} must publish an explicit zero; got:\n{out}"
+            );
+        }
+        assert!(out.contains("# TYPE xyzdb_invariant_level_overlap_total counter"));
+    }
+
+    #[test]
+    fn a_violation_is_attributed_to_its_keyspace() {
+        let mut by_ks = BTreeMap::new();
+        by_ks.insert("dictionary".to_string(), 2u64);
+        let mut out = String::new();
+        write_invariant_guards(
+            &mut out,
+            &InvariantGuards {
+                level_overlap: 2,
+                level_overlap_by_keyspace: by_ks,
+            },
+        );
+        assert!(out.contains("xyzdb_invariant_level_overlap_total 2"));
+        assert!(out.contains(
+            "xyzdb_invariant_level_overlap_by_keyspace_total{keyspace=\"dictionary\"} 2"
+        ));
+        // The other keyspaces stay at zero — the breakdown must not smear.
+        assert!(
+            out.contains("xyzdb_invariant_level_overlap_by_keyspace_total{keyspace=\"spatial\"} 0")
+        );
+    }
 }

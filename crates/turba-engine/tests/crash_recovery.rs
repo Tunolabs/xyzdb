@@ -22,6 +22,70 @@ use turba_engine::config::{EngineConfig, IoSchedulerMode, StorageProfile};
 use turba_engine::engine::TurbaEngine;
 use turba_engine::journal::writer::PersistMode;
 
+/// A datadir that **survives a failing test** so the offending state can be
+/// autopsied offline, instead of being deleted with the `TempDir`.
+///
+/// Why: the historical "survivor key vanished" reproducer was flaky (11 events in
+/// one run, then 0 in ~66 crashes). Every one of those runs used a plain
+/// `tempfile::tempdir()`, so each corpse was deleted the instant the test ended —
+/// there is nothing left to autopsy. A frozen datadir turns a race that may never
+/// reproduce into an offline investigation that can be repeated forever.
+///
+/// Preserves on ANY panic (assertion failure included) via
+/// `std::thread::panicking()` in `Drop`, so no call site has to remember.
+struct KeepOnFailure {
+    dir: Option<tempfile::TempDir>,
+}
+
+impl KeepOnFailure {
+    fn new() -> Self {
+        Self {
+            dir: Some(tempfile::tempdir().expect("tempdir")),
+        }
+    }
+
+    fn path(&self) -> &Path {
+        self.dir.as_ref().expect("datadir still held").path()
+    }
+}
+
+impl Drop for KeepOnFailure {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            if let Some(dir) = self.dir.take() {
+                let path = dir.keep();
+                eprintln!(
+                    "\n=== DATADIR PRESERVED FOR AUTOPSY ===\n{}\n\
+                     (the test failed; this directory was NOT deleted so the \
+                     offending on-disk state can be inspected offline)\n",
+                    path.display()
+                );
+            }
+        }
+    }
+}
+
+/// Fail the run if any engine invariant guard fired.
+///
+/// Asserts on **state**, not on log text: a log-scraping gate is fragile to the
+/// subscriber's filter level, the message format, and buffering around a process
+/// that is about to be SIGKILLed — and in a test binary no subscriber is installed
+/// at all, so a log-only guard emits nothing. The counter is readable in every
+/// configuration. See `turba_engine::tree::version::level_overlap_violations`.
+///
+/// A guard firing means the read path's assumption was violated: an overlapping
+/// L1+ run makes point reads able to miss keys a scan still finds — the exact
+/// shape of the class this harness exists to catch.
+fn assert_no_invariant_guards(context: &str) {
+    let overlap = turba_engine::tree::version::level_overlap_violations();
+    assert_eq!(
+        overlap, 0,
+        "{context}: engine invariant guard fired {overlap}× (L1+ level overlap). \
+         An overlapping L1+ run breaks get_at's binary search, so point reads can \
+         silently miss present keys. This is an engine bug, not a flaky test."
+    );
+}
+
 const CHILD_ENV: &str = "XYZ_CRASH_TEST_CHILD";
 const CHILD_DB_PATH: &str = "XYZ_CRASH_TEST_DB";
 
@@ -76,7 +140,7 @@ fn crash_after_acked_writes_preserves_them() {
     }
 
     // Parent.
-    let tmp = tempfile::tempdir().expect("tempdir");
+    let tmp = KeepOnFailure::new();
     let mut child = spawn_child(
         "crash_after_acked_writes_preserves_them",
         "write_acked",
@@ -105,6 +169,9 @@ fn crash_after_acked_writes_preserves_them() {
 
     // Reopen and verify every acked record is present.
     let engine = TurbaEngine::open(tmp.path(), config()).expect("parent reopen");
+    // The reopen path runs the L1+ non-overlap guard; a firing guard means point
+    // reads can miss present keys, so it must FAIL the run, not just log.
+    assert_no_invariant_guards("after SIGKILL + reopen");
     let mut recovered: u64 = 0;
     for i in 0..acked {
         let key = format!("key{:05}", i);
@@ -169,7 +236,7 @@ fn finding_9_paused_sync_writer_blocks_before_ack() {
         return;
     }
 
-    let tmp = tempfile::tempdir().expect("tempdir");
+    let tmp = KeepOnFailure::new();
     let mut child = spawn_child(
         "finding_9_paused_sync_writer_blocks_before_ack",
         "paused_sync_writer",
@@ -202,6 +269,9 @@ fn finding_9_paused_sync_writer_blocks_before_ack() {
     // but the WAL was never fsynced — same reopen outcome. This test
     // verifies the subprocess path does not corrupt state in either case.
     let engine = TurbaEngine::open(tmp.path(), config()).expect("parent reopen");
+    // The reopen path runs the L1+ non-overlap guard; a firing guard means point
+    // reads can miss present keys, so it must FAIL the run, not just log.
+    assert_no_invariant_guards("after SIGKILL + reopen");
     let found = engine.spatial.get(b"paused_key").expect("get").is_some();
     assert!(
         !found,
@@ -262,7 +332,7 @@ fn crash_under_active_wal_pruning_preserves_acked() {
         return;
     }
 
-    let tmp = tempfile::tempdir().expect("tempdir");
+    let tmp = KeepOnFailure::new();
     let mut child = spawn_child(
         "crash_under_active_wal_pruning_preserves_acked",
         "prune_under_load",
@@ -286,6 +356,7 @@ fn crash_under_active_wal_pruning_preserves_acked() {
     child.wait().expect("wait child");
 
     let engine = TurbaEngine::open(tmp.path(), prune_config()).expect("parent reopen");
+    assert_no_invariant_guards("after SIGKILL under WAL pruning + reopen");
     let mut recovered = 0u64;
     for i in 0..acked {
         let key = format!("key{:05}", i);

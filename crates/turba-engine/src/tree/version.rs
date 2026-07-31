@@ -10,10 +10,77 @@ use crate::cache::BlockCache;
 use crate::memtable::Memtable;
 use crate::table::meta::SSTableMeta;
 use crate::table::reader::SSTableReader;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
 pub const MAX_LEVELS: usize = 7;
+
+/// Count of L1+ non-overlap invariant violations observed in this process.
+///
+/// Bumped by [`Version::check_level_non_overlapping`] whenever an overlapping
+/// L1+ run is detected — the state that makes `get_at`'s per-level binary search
+/// able to silently miss present keys.
+///
+/// Process-global on purpose: the guard runs from two static-ish contexts (tree
+/// open, before a `Tree` exists; and `Version::with_compaction_applied`, which
+/// returns a fresh `Version`), so threading a per-tree field through them would
+/// be plumbing without extra signal — there is exactly one such invariant today.
+/// Read it via [`level_overlap_violations`]; it is surfaced in the engine's stats
+/// so a health query sees it in EVERY configuration, subscriber or not.
+static LEVEL_OVERLAP_VIOLATIONS: AtomicU64 = AtomicU64::new(0);
+
+/// Per-keyspace breakdown of the same violations.
+///
+/// The total answers *"did it happen"*; this answers *"where"* — which is half the
+/// diagnosis, because the keyspace decides the blast radius. An overlap in
+/// `dictionary` means a point-get can miss an anchor key, so a duplicate-anchor
+/// check can fail to detect a duplicate and an idempotent insert stops being
+/// idempotent; the same overlap in `spatial` degrades a record read instead. The
+/// label is derived from the table's own path (`…/<keyspace>/<id>.sst`), so no
+/// call site had to grow a parameter.
+///
+/// A `Mutex<BTreeMap>` and not atomics: the guard fires approximately never, so
+/// lock cost is irrelevant, and a map keeps the keyspace set open (a sixth
+/// keyspace needs no code change here).
+static LEVEL_OVERLAP_BY_KEYSPACE: std::sync::LazyLock<std::sync::Mutex<BTreeMap<String, u64>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(BTreeMap::new()));
+
+/// Number of L1+ non-overlap invariant violations seen since process start.
+///
+/// **Non-zero means a correctness-relevant invariant fired**: an overlapping L1+
+/// run breaks the read path's binary search, so point reads can miss keys that a
+/// scan still finds. It never resets and never decreases.
+///
+/// # Returns
+/// The running count across every keyspace. `0` in a healthy process.
+pub fn level_overlap_violations() -> u64 {
+    LEVEL_OVERLAP_VIOLATIONS.load(AtomicOrdering::Relaxed)
+}
+
+/// Per-keyspace counts behind [`level_overlap_violations`], keyed by the
+/// keyspace directory name (`spatial`, `identity`, `dictionary`, `ghosts`,
+/// `vectors`, or `unknown` if the path shape is unexpected).
+///
+/// # Returns
+/// A snapshot of the map. Empty in a healthy process.
+pub fn level_overlap_by_keyspace() -> BTreeMap<String, u64> {
+    LEVEL_OVERLAP_BY_KEYSPACE
+        .lock()
+        .map(|m| m.clone())
+        .unwrap_or_default()
+}
+
+/// The keyspace a table belongs to, from its path: `…/<keyspace>/<id>.sst`.
+fn keyspace_of(table: &TableHandle) -> String {
+    table
+        .path
+        .parent()
+        .and_then(|p| p.file_name())
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "unknown".to_string())
+}
 
 /// Handle to an SSTable on disk with its pre-loaded reader.
 ///
@@ -120,9 +187,29 @@ impl Version {
     /// from a buggy compaction can share a key range — so a violation lets point
     /// reads silently miss present keys (the L1+ data-miss class fixed at the
     /// data level in v0.7.x). This asserts the invariant the read path assumes:
-    /// it panics in debug/test builds and logs a loud error in release, because
-    /// overlap is a compaction bug to surface, not a recoverable data state to
-    /// tolerate silently.
+    /// it panics in debug/test builds, logs a loud error, AND bumps a counter,
+    /// because overlap is a compaction bug to surface, not a recoverable data
+    /// state to tolerate silently.
+    ///
+    /// ## Why a counter and not only a log (2026-07-31)
+    ///
+    /// The log alone made this guard **invisible to library consumers**. Three
+    /// configurations, only two of which could ever speak:
+    /// - debug/test: `debug_assert!` panics → visible;
+    /// - release WITH a `tracing` subscriber installed (e.g. `xyzdb-server`) →
+    ///   the `error!` prints → visible;
+    /// - release WITHOUT a subscriber — **every embedder that links this crate as
+    ///   a library, because installing a subscriber is the caller's job and most
+    ///   callers do not** → the assert is compiled out and `error!` is a no-op, so
+    ///   a fired invariant left **no trace anywhere**.
+    ///
+    /// An invariant owned by the engine must not delegate its visibility to the
+    /// caller's logging plumbing. [`level_overlap_violations`] makes it observable
+    /// as **state**, readable in every configuration, and lets a harness assert on
+    /// a deterministic counter instead of scraping text (fragile to filter level,
+    /// format, and buffering around a process that is about to die). Same shape as
+    /// the SCRUB findings, which are attended precisely because the caller reads
+    /// them.
     ///
     /// # Arguments
     /// * `level_idx` - The level being checked. Must be `>= 1`; L0 is exempt (it
@@ -141,8 +228,18 @@ impl Version {
                 i - 1,
                 i
             );
-            debug_assert!(false, "{msg}");
-            tracing::error!("{msg}");
+            // Record BEFORE the assert: in debug the panic must not swallow the
+            // observation, so a harness that catches the panic still sees the count.
+            LEVEL_OVERLAP_VIOLATIONS.fetch_add(1, AtomicOrdering::Relaxed);
+            let keyspace = level
+                .first()
+                .map(|t| keyspace_of(t))
+                .unwrap_or_else(|| "unknown".to_string());
+            if let Ok(mut by_ks) = LEVEL_OVERLAP_BY_KEYSPACE.lock() {
+                *by_ks.entry(keyspace.clone()).or_insert(0) += 1;
+            }
+            debug_assert!(false, "{keyspace}/{msg}");
+            tracing::error!(keyspace = %keyspace, "{msg}");
         }
     }
 
@@ -253,5 +350,113 @@ mod tests {
         // First two are disjoint; the overlap is between index 2 and 3.
         let bounds: &[(&[u8], &[u8])] = &[(b"a", b"c"), (b"d", b"f"), (b"g", b"p"), (b"k", b"z")];
         assert_eq!(first_overlapping_index(bounds), Some(3));
+    }
+
+    // ─── Negative control for the invariant counter ──────────────────────────
+    //
+    // The cases above pin the pure core. They do NOT prove the COUNTER is wired:
+    // if `LEVEL_OVERLAP_VIOLATIONS` never incremented, every run would report a
+    // healthy zero and the harness gate built on it would be decoration. A
+    // detector that cannot fire is not evidence — so this drives the real guard,
+    // through real SSTables, and asserts the counter moves.
+
+    use super::{Version, level_overlap_violations};
+    use crate::cache::BlockCache;
+    use crate::table::writer::{SSTableConfig, SSTableWriter};
+    use crate::types::{Entry, ValueType};
+    use std::sync::{Arc, Mutex};
+
+    /// The violation counter is process-global, so the two tests below — which
+    /// assert on a DELTA — must not run concurrently: one bumping while the other
+    /// samples its baseline makes the healthy case read the neighbour's increment.
+    /// (Found by this very control failing under the default parallel runner; the
+    /// harness gate in `crash_recovery.rs` is immune because it asserts `== 0`
+    /// absolutely, not a delta.)
+    static COUNTER_TESTS: Mutex<()> = Mutex::new(());
+
+    /// Write a one-per-key SSTable spanning `keys` and open it as a handle.
+    fn table_spanning(dir: &std::path::Path, id: u64, keys: &[&[u8]]) -> Arc<super::TableHandle> {
+        let path = dir.join(format!("{id:06}.sst"));
+        let mut w = SSTableWriter::new(&path, id, SSTableConfig::default()).expect("writer");
+        for (i, k) in keys.iter().enumerate() {
+            w.add(Entry::new(
+                k.to_vec(),
+                b"v".to_vec(),
+                (i + 1) as u64,
+                ValueType::Value,
+            ))
+            .expect("add");
+        }
+        w.finish().expect("finish").expect("non-empty table");
+        Version::open_table(
+            path,
+            Arc::new(BlockCache::new(1 << 20)),
+            0,
+            Arc::new(crate::io::Scheduler::passthrough()),
+        )
+        .expect("open table")
+    }
+
+    #[test]
+    fn overlap_guard_increments_the_counter() {
+        let _serial = COUNTER_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().expect("tempdir");
+        // Two REAL tables whose key ranges overlap: [a..k] and [e..q]. This is the
+        // forbidden L1+ state that makes get_at's binary search able to miss keys.
+        let t1 = table_spanning(dir.path(), 1, &[b"a", b"k"]);
+        let t2 = table_spanning(dir.path(), 2, &[b"e", b"q"]);
+
+        let before = level_overlap_violations();
+        // In debug the guard's `debug_assert!` panics, so catch it — the counter is
+        // bumped BEFORE the assert precisely so the observation survives the panic.
+        // The hook is silenced so the expected panic does not look like a failure.
+        let prev_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            Version::check_level_non_overlapping(1, &[t1, t2]);
+        }));
+        std::panic::set_hook(prev_hook);
+
+        assert_eq!(
+            level_overlap_violations(),
+            before + 1,
+            "the overlap guard must record the violation as STATE; without this the \
+             harness gate and the stats field would report a healthy zero forever"
+        );
+        // …and it must say WHERE. The tables live in a directory named after the
+        // keyspace, which is how the label is derived; a wrong label would make the
+        // breakdown worse than useless (it would point the next investigation at
+        // the wrong keyspace).
+        let ks = dir
+            .path()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        assert_eq!(
+            super::level_overlap_by_keyspace().get(&ks).copied(),
+            Some(1),
+            "the violation must be attributed to the keyspace the tables live in ({ks})"
+        );
+        // Debug builds additionally panic (the assert); release builds return Ok.
+        // Both are acceptable — the counter is the configuration-independent signal.
+        let _ = outcome;
+    }
+
+    #[test]
+    fn healthy_level_leaves_the_counter_untouched() {
+        let _serial = COUNTER_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        // The other half of the control: the counter must NOT drift on a sane
+        // level, or "non-zero means a real violation" would be a lie.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let t1 = table_spanning(dir.path(), 11, &[b"a", b"c"]);
+        let t2 = table_spanning(dir.path(), 12, &[b"m", b"z"]);
+        let before = level_overlap_violations();
+        Version::check_level_non_overlapping(1, &[t1, t2]);
+        assert_eq!(
+            level_overlap_violations(),
+            before,
+            "a non-overlapping level must not bump the violation counter"
+        );
     }
 }
