@@ -25,6 +25,15 @@ All notable changes to xyzDB are documented here. Format based on [Keep a Change
   pick an immutable axis field or mutate with `SET`. Records missing the field
   share satellite 0, so the axis pays only when the field is near-universal in
   the lobe. See `docs/xytalk-spec.md` §2.2.2.
+- **`budget_stop` now reports which order produced the partial** (`strategy:
+  "score_order" | "key_order"`). It names the fact, not the implementation, and it
+  earns its place on a deliberately minimal struct for one reason: without it a
+  reading the spec already documents — extrapolating the observed pass rate to the
+  unexamined tail and concluding "almost certainly no more" — is FALSE when
+  candidates were walked in key order, where the unwalked region can hold BETTER
+  rows rather than merely more. `docs/xytalk-spec.md` §2.20 now separates the two
+  readings: *how many remain* holds under both orders, *whether what remains is
+  worse* holds only under `score_order`.
 - `NEAREST` responses truncated by the latency airbag (`--nearest-budget-ms`)
   now carry a `budget_stop` object (`examined` / `candidates` / `found`) — the
   counts at the cut, turning the `has_more` inference into a fact. Present ONLY

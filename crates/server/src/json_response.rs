@@ -105,6 +105,11 @@ pub fn serialize_json(
                         "examined": bs.examined,
                         "candidates": bs.candidates,
                         "found": bs.found,
+                        // Says WHAT KIND of partial this is: a prefix (score_order)
+                        // or the best of a key region (key_order, where the unwalked
+                        // part may hold better rows). Without it the documented
+                        // "extrapolate the pass rate" reading is false for one order.
+                        "strategy": bs.strategy,
                     }),
                 );
             }
@@ -333,6 +338,7 @@ mod budget_stop_wire {
             cursor: None,
             has_more: true,
             budget_stop: Some(BudgetStop {
+                strategy: xyzdb_core::result::ScanStrategy::ScoreOrder,
                 examined: 238_000,
                 candidates: 246_000,
                 found: 6,
@@ -342,6 +348,11 @@ mod budget_stop_wire {
         assert_eq!(j["budget_stop"]["examined"], json!(238_000));
         assert_eq!(j["budget_stop"]["candidates"], json!(246_000));
         assert_eq!(j["budget_stop"]["found"], json!(6));
+        // The discriminant must reach the wire as the plain word a consumer reads
+        // (not an enum name): it is what distinguishes a PREFIX of the answer from
+        // the best of a key region, and without it the documented "extrapolate the
+        // pass rate to the tail" reading is false for one of the two orders.
+        assert_eq!(j["budget_stop"]["strategy"], json!("score_order"));
     }
 
     #[test]

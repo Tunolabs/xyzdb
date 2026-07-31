@@ -772,7 +772,17 @@ fn try_prefix_scan_nearest(
     // budget_stop is Some ONLY when the airbag cut the hydration tail — the one
     // case where `has_more=true` is a budget stop, not a resumable page. Turns
     // "there may be more" into "examined E of C candidates, found F".
+    // The partial's KIND depends on the order it was produced in, and the consumer
+    // cannot tell from the counts alone: under score order it holds a prefix (what
+    // is missing scores no better); under key order it holds the best of a key
+    // region (what is missing may score BETTER). Report the fact.
+    let strategy = if strategy_b {
+        xyzdb_core::result::ScanStrategy::KeyOrder
+    } else {
+        xyzdb_core::result::ScanStrategy::ScoreOrder
+    };
     let budget_stop = hydration_truncated.then(|| xyzdb_core::result::BudgetStop {
+        strategy,
         examined,
         candidates,
         found: out.len(),

@@ -88,11 +88,46 @@ pub struct BudgetStop {
     /// The whole SCORED set in score order (the bucket), before the residual.
     /// NOT the number of filter matches.
     pub candidates: usize,
-    /// Passers returned — the prefix-correct, highest-scoring survivors so far.
-    /// Redundant with `records.len()` BY CONSTRUCTION (same value today); kept
-    /// because it is explicit and cheap. If a later cap ever trims `records`
-    /// after this is set, `records.len()` is authoritative, not `found`.
+    /// Passers returned. Redundant with `records.len()` BY CONSTRUCTION (same
+    /// value today); kept because it is explicit and cheap. If a later cap ever
+    /// trims `records` after this is set, `records.len()` is authoritative.
     pub found: usize,
+    /// Which iteration order produced this partial — and therefore WHAT KIND of
+    /// partial it is. `"score_order"`: candidates were walked best-first, so the
+    /// rows are a true PREFIX of the answer and nothing unexamined scores better.
+    /// `"key_order"`: candidates were walked in key order for sequential I/O, so
+    /// the rows are the best of a contiguous KEY REGION and the unwalked part may
+    /// hold BETTER ones, not merely more.
+    ///
+    /// It names the FACT, not the implementation: the consumer needs to know
+    /// whether it holds a prefix or a sample, and that stays the right question
+    /// even if a third traversal appears — so it is not `"A"`/`"B"`.
+    ///
+    /// This field earns its place on a struct chosen to be minimal (see the type
+    /// doc) for ONE reason: without it, a derived reading this engine already
+    /// documents — extrapolating the observed pass rate to the unexamined tail to
+    /// conclude "almost certainly no more" — is FALSE under `key_order`, where the
+    /// unwalked region can hold better rows. Not completeness; keeping an existing
+    /// claim true.
+    pub strategy: ScanStrategy,
+}
+
+/// How the candidates were walked to produce a truncated partial — i.e. what KIND
+/// of partial the caller is holding.
+///
+/// Serialises as `"score_order"` / `"key_order"`. An enum rather than a bare
+/// string so an invalid value cannot be constructed, while the wire form stays the
+/// plain word a consumer reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScanStrategy {
+    /// Walked best-first. The rows returned are a true PREFIX of the answer:
+    /// nothing left unexamined scores better than what came back.
+    ScoreOrder,
+    /// Walked in key order, for sequential I/O. The rows are the best of a
+    /// contiguous KEY REGION, so the unwalked part may hold BETTER rows — not
+    /// merely more of them.
+    KeyOrder,
 }
 
 impl QueryResult {
