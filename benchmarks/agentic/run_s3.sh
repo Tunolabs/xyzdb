@@ -24,12 +24,12 @@ for envl in $S3_ENVS; do
   for e in "${ENGINES[@]}"; do
     out="$OUTDIR/${label}__${e}.jsonl"; donef="$out.done"
     [ -f "$donef" ] && { echo "[skip] $out" | tee -a "$LOG"; continue; }
-    : > "$out"
+    : > "$out"; fail_reason=""
     echo "[$(date +%H:%M:%S)] $label $e steps=$STEPS" | tee -a "$LOG"
     if ! up_engine "$e" "$mem" "$memswap" "$cpus" "$cache"; then
       st=$(dead_reason "$e")
       "$PY" -c "import json;open('$out','a').write(json.dumps({'kind':'s3','engine':'$e','envelope':'$label','status':'$st'})+chr(10))"
-      echo "  -> $st" | tee -a "$LOG"; down_engine "$e"; touch "$donef"; continue
+      echo "  -> $st" | tee -a "$LOG"; down_engine "$e" "$st"; touch "$donef"; continue
     fi
     # S3 tolerates measure nonzero (OOM growing = a recorded result inside the jsonl).
     "$PY" measure_s3.py --engine "$e" --container "bench-$e" --envelope "$label" \

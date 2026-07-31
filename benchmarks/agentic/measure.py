@@ -13,6 +13,8 @@ footprint → RAM-at-rest (post graceful restart), disk-at-rest (du on the mount
 import argparse
 import json
 import subprocess
+import urllib.error
+import urllib.request
 import threading
 import time
 
@@ -105,6 +107,57 @@ def load_corpus(db, lobe: str, c) -> float:
     return time.perf_counter() - t0
 
 
+class InvariantGuardFired(RuntimeError):
+    """An engine invariant guard fired during a measured phase.
+
+    Not a measurement problem — an engine bug. Raised so the cell FAILS instead
+    of publishing a number taken while a correctness invariant was violated.
+    """
+
+
+def read_invariant_guards(host: str, port: int) -> dict:
+    """Read the engine's invariant-guard counters from `/stats` (JSON on the
+    same TCP port as the wire protocol).
+
+    Always on: this is a single HTTP GET at a PHASE BOUNDARY, never inside the
+    measured loop, so it cannot move a latency number. That is the whole reason
+    it does not need a flag, unlike the forensic Docker options.
+
+    Why it is worth reading at all: the "survivor key vanished" event has an
+    unknown, savage base rate (11 in one run, then 0 in ~66 crashes). These
+    counters are a HIGH-frequency signal for the strongest remaining suspect —
+    an L1+ level overlap makes point reads silently miss keys a scan still finds
+    — so a non-zero implicates it WITHOUT having to catch the rare symptom. The
+    per-keyspace breakdown says where, which sets the blast radius.
+
+    Returns the guards dict, e.g. ``{"level_overlap": 0,
+    "level_overlap_by_keyspace": {}}``. On an engine too old to expose the field,
+    returns ``{}`` — the ABSENCE is reported as such rather than faked as a zero,
+    because a fabricated zero would be exactly the silence this removes.
+    """
+    try:
+        with urllib.request.urlopen(f"http://{host}:{port}/stats", timeout=10) as r:
+            snap = json.loads(r.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, json.JSONDecodeError) as e:
+        return {"unavailable": str(e)}
+    return snap.get("invariant_guards", {})
+
+
+def assert_no_invariant_guards(host: str, port: int, phase: str) -> dict:
+    """Read the guards and FAIL the phase if any fired. Returns the dict so the
+    caller can publish it as part of the cell's conditions."""
+    guards = read_invariant_guards(host, port)
+    total = guards.get("level_overlap", 0)
+    if total:
+        raise InvariantGuardFired(
+            f"{phase}: engine invariant guard fired {total}x "
+            f"(by keyspace: {guards.get('level_overlap_by_keyspace')}). "
+            "An overlapping L1+ run breaks the read path's binary search, so "
+            "point reads can silently miss present keys. The number from this "
+            "cell is not publishable."
+        )
+    return guards
+
 def run_query(args, c) -> dict:
     db = xyzdb.connect(args.host, args.port)
     load_s = load_corpus(db, args.lobe, c)
@@ -128,6 +181,11 @@ def run_query(args, c) -> dict:
             got = {r["id"] for r in recs if "id" in r}
             recalls.append(len(got & oid) / k)
     peak = sampler.stop()
+    # Phase boundary: read the engine's invariant guards BEFORE emitting. A fired
+    # guard fails the cell — a latency/recall number taken while a correctness
+    # invariant was violated is not publishable. The zero is published too, so
+    # "no violation" is data, not silence.
+    guards = assert_no_invariant_guards(args.host, args.port, "query phase")
     db.close()
 
     a = np.array(lat_ms)
@@ -140,6 +198,7 @@ def run_query(args, c) -> dict:
         "mean_ms": round(float(a.mean()), 3),
         "std_ms": round(float(a.std()), 3),
         "ram_peak_mb": round(peak, 1), "load_s": round(load_s, 1), "status": None,
+        "invariant_guards": guards,
     }
 
 
@@ -152,6 +211,11 @@ def run_footprint(args, c) -> dict:
     if not wait_ready(args.host, args.port):
         return {"kind": "footprint", "engine": "xyzdb", "image": args.image,
                 "round": args.round, "envelope": args.envelope, "status": "restart_failed"}
+    # The restart is a fresh PROCESS, so the guard counters restart at zero and
+    # what they now cover is the REOPEN — the open path that runs the L1+ guard,
+    # i.e. exactly the recovery path under suspicion. Reading here is therefore
+    # not redundant with the query-phase read: it is the more interesting one.
+    guards = assert_no_invariant_guards(args.host, args.port, "footprint phase (post-reopen)")
     ram = sorted(docker_mem_mb(args.container) for _ in range(3))[1]  # median-3
     du = subprocess.run(["du", "-sk", f"{args.datadir}/xyzdb"],
                         capture_output=True, text=True).stdout.split()
@@ -161,6 +225,7 @@ def run_footprint(args, c) -> dict:
         "envelope": args.envelope, "regime": args.regime,
         "ram_rest_mb": round(ram, 1), "disk_total_mb": disk_mb,
         "load_s": round(load_s, 1), "status": None,
+        "invariant_guards": guards,
     }
 
 
@@ -186,6 +251,8 @@ def run_both(args, c) -> list:
             got = {r["id"] for r in recs if "id" in r}
             recalls.append(len(got & oid) / k)
     peak = sampler.stop()
+    # Boundary 1: covers load + query in the ORIGINAL process.
+    qguards = assert_no_invariant_guards(args.host, args.port, "both/query phase")
     db.close()
     a = np.array(lat_ms)
     qrec = {
@@ -196,12 +263,15 @@ def run_both(args, c) -> list:
         "p99_ms": round(float(np.percentile(a, 99)), 3),
         "mean_ms": round(float(a.mean()), 3), "std_ms": round(float(a.std()), 3),
         "ram_peak_mb": round(peak, 1), "load_s": round(load_s, 1), "status": None,
+        "invariant_guards": qguards,
     }
     # graceful restart → footprint
     subprocess.run(["docker", "restart", args.container], capture_output=True, timeout=180)
     frec = {"kind": "footprint", "engine": "xyzdb", "image": args.image, "round": args.round,
             "envelope": args.envelope, "regime": args.regime, "status": "restart_failed"}
     if wait_ready(args.host, args.port):
+        # Boundary 2: fresh process ⇒ this read covers the REOPEN's open-path guard.
+        fguards = assert_no_invariant_guards(args.host, args.port, "both/footprint (post-reopen)")
         ram = sorted(docker_mem_mb(args.container) for _ in range(3))[1]
         du = subprocess.run(["du", "-sk", f"{args.datadir}/xyzdb"],
                             capture_output=True, text=True).stdout.split()
@@ -209,7 +279,8 @@ def run_both(args, c) -> list:
         frec = {"kind": "footprint", "engine": "xyzdb", "image": args.image, "round": args.round,
                 "envelope": args.envelope, "regime": args.regime,
                 "ram_rest_mb": round(ram, 1), "disk_total_mb": disk_mb,
-                "load_s": round(load_s, 1), "status": None}
+                "load_s": round(load_s, 1), "status": None,
+                "invariant_guards": fguards}
     return [qrec, frec]
 
 

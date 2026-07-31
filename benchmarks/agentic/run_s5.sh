@@ -29,12 +29,12 @@ for envl in $S5_ENVS; do
   for e in "${ENGINES[@]}"; do
     out="$OUTDIR/${label}__${e}.jsonl"; donef="$out.done"
     [ -f "$donef" ] && { echo "[skip] $out" | tee -a "$LOG"; continue; }
-    : > "$out"
+    : > "$out"; fail_reason=""
     echo "[$(date +%H:%M:%S)] $label $e" | tee -a "$LOG"
     if ! up_engine "$e" "$mem" "$memswap" "$cpus" "$cache"; then
       st=$(dead_reason "$e")
       "$PY" -c "import json;open('$out','a').write(json.dumps({'kind':'s5','engine':'$e','envelope':'$label','status':'$st'})+chr(10))"
-      echo "  -> $st" | tee -a "$LOG"; down_engine "$e"; touch "$donef"; continue
+      echo "  -> $st" | tee -a "$LOG"; down_engine "$e" "$st"; touch "$donef"; continue
     fi
     if "$PY" measure_s5.py --engine "$e" --container "bench-$e" $(diskarg_for "$e") \
          --storage "${STORAGE:-local}" --envelope "$label" --split "$SPLIT" --k "$K" \
@@ -43,7 +43,7 @@ for envl in $S5_ENVS; do
     elif [ "$(docker inspect -f '{{.State.Running}}' bench-$e 2>/dev/null)" != true ]; then
       st=$(dead_reason "$e")
       "$PY" -c "import json;open('$out','a').write(json.dumps({'kind':'s5','engine':'$e','envelope':'$label','status':'$st'})+chr(10))"
-      echo "  -> measure died: $st" | tee -a "$LOG"; touch "$donef"
+      echo "  -> measure died: $st" | tee -a "$LOG"; fail_reason="$st"; touch "$donef"
     else
       echo "  !! measure nonzero (engine alive) — no .done, retry on resume" | tee -a "$LOG"
     fi

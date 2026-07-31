@@ -25,12 +25,12 @@ for envl in $S4_ENVS; do
   for e in "${ENGINES[@]}"; do
     out="$OUTDIR/${label}__${e}.jsonl"; donef="$out.done"
     [ -f "$donef" ] && { echo "[skip] $out" | tee -a "$LOG"; continue; }
-    : > "$out"
+    : > "$out"; fail_reason=""
     echo "[$(date +%H:%M:%S)] $label $e" | tee -a "$LOG"
     if ! up_engine "$e" "$mem" "$memswap" "$cpus" "$cache"; then
       st=$(dead_reason "$e")
       "$PY" -c "import json;open('$out','a').write(json.dumps({'kind':'s4','engine':'$e','envelope':'$label','status':'$st'})+chr(10))"
-      echo "  -> $st" | tee -a "$LOG"; down_engine "$e"; touch "$donef"; continue
+      echo "  -> $st" | tee -a "$LOG"; down_engine "$e" "$st"; touch "$donef"; continue
     fi
     "$PY" measure_s4.py --engine "$e" --container "bench-$e" $(diskarg_for "$e") \
         --storage "${STORAGE:-local}" --envelope "$label" --base_n "$BASE_N" --out "$out" >>"$LOG" 2>&1 \

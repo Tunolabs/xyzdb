@@ -107,7 +107,7 @@ for corpspec in "${CORPORA[@]}"; do
     for e in "${ENGINES[@]}"; do
       out="$OUTDIR/${envl}__${corp}__${e}.jsonl"; donef="$out.done"
       [ -f "$donef" ] && { echo "[skip] $out" | tee -a "$LOG"; continue; }
-      : > "$out"
+      : > "$out"; fail_reason=""
       echo "[$(date +%H:%M:%S)] $envl $corp $e" | tee -a "$LOG"
       if ! up "$e" "$mem" "$cpus" "$cache"; then
         st=$(dead_reason "$e")
@@ -121,7 +121,7 @@ for corpspec in "${CORPORA[@]}"; do
       elif [ "$(docker inspect -f '{{.State.Running}}' bench-$e 2>/dev/null)" != true ]; then
         st=$(dead_reason "$e")
         "$PY" -c "import json;open('$out','a').write(json.dumps({'kind':'query','engine':'$e','envelope':'$envl','corpus':'$corp','pass':'dense','status':'$st'})+chr(10))"
-        echo "  -> measure died: $st" | tee -a "$LOG"; touch "$donef"
+        echo "  -> measure died: $st" | tee -a "$LOG"; fail_reason="$st"; touch "$donef"
       else
         echo "  !! measure nonzero (engine alive) — no .done, retry on resume" | tee -a "$LOG"
       fi

@@ -35,12 +35,12 @@ for envl in $S1_ENVS; do
       tag="$e"; [ "$e" = qdrant ] && tag="qdrant-$v"
       out="$OUTDIR/${label}__${tag}.jsonl"; donef="$out.done"
       [ -f "$donef" ] && { echo "[skip] $out" | tee -a "$LOG"; continue; }
-      : > "$out"
+      : > "$out"; fail_reason=""
       echo "[$(date +%H:%M:%S)] $label $tag" | tee -a "$LOG"
       if ! up_engine "$e" "$mem" "$memswap" "$cpus" "$cache"; then
         st=$(dead_reason "$e")
         "$PY" -c "import json,sys;open('$out','a').write(json.dumps({'kind':'s1','engine':'$e','envelope':'$label','qd_variant':('$v' if '$e'=='qdrant' else None),'status':'$st'})+chr(10))"
-        echo "  -> $st" | tee -a "$LOG"; down_engine "$e"; touch "$donef"; continue
+        echo "  -> $st" | tee -a "$LOG"; down_engine "$e" "$st"; touch "$donef"; continue
       fi
       qdarg=""; [ "$e" = qdrant ] && qdarg="--qd_variant $v"
       if "$PY" measure_s1.py --engine "$e" --container "bench-$e" $(diskarg_for "$e") \
@@ -50,11 +50,11 @@ for envl in $S1_ENVS; do
       elif [ "$(docker inspect -f '{{.State.Running}}' bench-$e 2>/dev/null)" != true ]; then
         st=$(dead_reason "$e")
         "$PY" -c "import json;open('$out','a').write(json.dumps({'kind':'s1','engine':'$e','envelope':'$label','status':'$st'})+chr(10))"
-        echo "  -> measure died: $st" | tee -a "$LOG"; touch "$donef"
+        echo "  -> measure died: $st" | tee -a "$LOG"; fail_reason="$st"; touch "$donef"
       else
         echo "  !! measure nonzero (engine alive) — no .done, retry on resume" | tee -a "$LOG"
       fi
-      down_engine "$e"
+      down_engine "$e" "${fail_reason:-}"
     done
   done
 done

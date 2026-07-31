@@ -42,6 +42,60 @@ datadir_for(){ case "$1" in xyzdb|chroma) echo /data;; pgvector) echo /var/lib/p
 # Where measure_*.py should `du` the on-disk footprint: bind path (AWS) or named volume (Mac).
 diskarg_for(){ if [ -n "${STORAGE_ROOT:-}" ]; then echo "--disk_path $STORAGE_ROOT/$1"; else echo "--volume bench_$1"; fi; }
 
+# ─── Forensic mode (OFF by default) ──────────────────────────────────────────
+# XYZ_FORENSIC=1 turns this harness into a trap for the "survivor key vanished"
+# class. It exists because the event happened HERE, not in the test harness: the
+# origin was a bench cell (S2@246k @cache128) in a release container, and the
+# evidence was lost twice over — `down_engine` removes the container (taking the
+# stderr where the engine's invariant-guard line WOULD have been printed, since
+# the server DOES install a tracing subscriber) and `up_engine` wipes the datadir
+# for the next cell. So the corpse and its last words were both deleted by design.
+#
+# NOT for a publishable run. It adds writes (log dump) and may archive the datadir,
+# so a cell measured with it on must either be a hunt run, or declare forensic mode
+# as a NAMED CONDITION in the reproducibility block. Reading the engine's invariant
+# counters is NOT part of this flag — that is a single HTTP GET at a phase boundary
+# in measure.py, always on, and it cannot move a number.
+FORENSIC="${XYZ_FORENSIC:-0}"
+FORENSIC_DIR="${XYZ_FORENSIC_DIR:-$PWD/forensics}"
+
+forensic_banner(){
+  [ "$FORENSIC" = 1 ] || return 0
+  mkdir -p "$FORENSIC_DIR"
+  echo "!!! FORENSIC MODE ON — container logs kept, datadir archived, failed containers NOT removed." >&2
+  echo "!!! Numbers from this run are NOT publishable unless forensic mode is declared as a condition." >&2
+  echo "!!! Artefacts: $FORENSIC_DIR" >&2
+}
+
+# preserve_forensics <engine> <reason> — freeze what a failing cell leaves behind.
+# Dumps the container log FIRST (it dies with the container) and archives the
+# datadir when it is a bind path. With a named/anonymous volume the datadir cannot
+# be frozen without STORAGE_ROOT — that is reported as a LIMITATION, never faked.
+preserve_forensics(){
+  [ "$FORENSIC" = 1 ] || return 0
+  local e=$1 reason=${2:-unknown} c=bench-$1 stamp
+  stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  local base="$FORENSIC_DIR/${stamp}-${e}-${reason}"
+  mkdir -p "$base"
+  docker logs "$c" > "$base/container.log" 2>&1 || echo "(no logs for $c)" > "$base/container.log"
+  docker inspect "$c" > "$base/inspect.json" 2>/dev/null || true
+  if [ -n "${STORAGE_ROOT:-}" ] && [ -d "$STORAGE_ROOT/$e" ]; then
+    cp -a "$STORAGE_ROOT/$e" "$base/datadir" 2>/dev/null \
+      && echo "preserved datadir → $base/datadir" >&2
+  else
+    echo "DATADIR NOT PRESERVED: no STORAGE_ROOT bind path (the engine data lives in a docker volume that up_engine wipes). Set STORAGE_ROOT to make the corpse survivable." \
+      > "$base/DATADIR_NOT_PRESERVED.txt"
+    echo "WARNING: datadir could not be preserved (no STORAGE_ROOT); see $base" >&2
+  fi
+  # Grep the dumped log for the invariant guard, so the hit is visible immediately
+  # instead of waiting for someone to think of grepping months later.
+  if grep -qE "overlap: table\[|silently miss present keys" "$base/container.log" 2>/dev/null; then
+    echo "!!! INVARIANT GUARD FIRED in $c — see $base/container.log" >&2
+    grep -nE "overlap: table\[|silently miss present keys" "$base/container.log" >&2 || true
+  fi
+  echo "forensics → $base" >&2
+}
+
 wait_ready(){  # $1=engine -> 0 ready / 1 died or timeout
   local e=$1 c=bench-$1 i=0 py="${PY:-python3}"
   while [ $i -lt 90 ]; do
@@ -83,4 +137,20 @@ up_engine(){  # $1=engine $2=mem $3=memswap $4=cpus $5=cache  -> 0 ready / 1 not
 
 # "OOM_or_failed_to_start" | "crash_or_oom_during_load" — a recorded result, never a silent skip.
 dead_reason(){ local c=bench-$1; [ "$(docker inspect -f '{{.State.OOMKilled}}' "$c" 2>/dev/null)" = true ] && { echo crash_or_oom_during_load; return; }; echo OOM_or_failed_to_start; }
-down_engine(){ docker rm -f "bench-$1" >/dev/null 2>&1 || true; }
+# down_engine <engine> [failure_reason] — tear the cell down.
+# With a failure_reason AND forensic mode on, the artefacts are frozen and the
+# container is LEFT IN PLACE for inspection (its logs are the only copy of what
+# the engine said). Without a reason, or with forensics off, behaviour is the
+# original unconditional removal so a normal run is byte-for-byte unchanged.
+down_engine(){
+  local e=$1 reason=${2:-}
+  if [ -n "$reason" ] && [ "$FORENSIC" = 1 ]; then
+    preserve_forensics "$e" "$reason"
+    echo "forensic mode: leaving container bench-$e in place for inspection" >&2
+    return 0
+  fi
+  docker rm -f "bench-$e" >/dev/null 2>&1 || true
+}
+
+# Announce forensic mode at source time (no-op when off).
+forensic_banner

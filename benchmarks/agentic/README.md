@@ -134,6 +134,25 @@ carries the deployment, tier, scale, scenario, the metrics above, and a `status`
 - **DIRECTION vs publishable.** Mac / OrbStack runs mediate the page cache and give
   direction only; the publishable dataset is the AWS m6a.xlarge (x86-64-v3) run named in
   `docs/benchmark-agentic.md`.
+- **Engine invariant guards are read at every phase boundary, always on.** Each emitted
+  record carries an `invariant_guards` field, and a non-zero count **fails the cell**: a
+  latency or recall number taken while a correctness invariant was violated is not
+  publishable. The read is one HTTP `GET /stats` between phases — never inside a measured
+  loop — so it cannot move a number, which is why it needs no flag. The zero is published
+  deliberately: an absent field would leave "no violation" as silence instead of data.
+  Note the semantics around the graceful restart: the counters are per-process, so the
+  post-restart read covers the **reopen** (the open path that checks the L1+ level
+  invariant), which is the more interesting of the two boundaries.
+- **Forensic mode (`XYZ_FORENSIC=1`) is OFF by default and must be declared if used.**
+  It freezes what a failing cell leaves behind — dumps the container log (the only copy of
+  what the engine said; the server *does* install a `tracing` subscriber, so an invariant
+  guard prints there), archives the datadir when `STORAGE_ROOT` gives a bind path, and
+  leaves the failed container in place for inspection instead of removing it. It exists
+  because a real event (`S2@246k @cache128`) was lost exactly this way: the container was
+  removed and the next cell wiped the datadir. It **adds writes and changes teardown**, so
+  a cell measured with it enabled is a hunt run, not a publishable one — if a published
+  number ever comes from a forensic run, forensic mode must appear here as a named
+  condition. With the flag off, teardown is byte-for-byte the original behaviour.
 
 ## 7. Citation
 

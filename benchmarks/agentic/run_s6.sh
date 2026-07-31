@@ -37,12 +37,12 @@ for d in "${DEPLOYS[@]}"; do
   e="$(vec_engine "$d")"; needstore=""; case "$d" in *+pg) needstore=1;; esac
   out="$OUTDIR/${label}__$(echo "$d" | tr '+' '-').jsonl"; donef="$out.done"
   [ -f "$donef" ] && { echo "[skip] $out" | tee -a "$LOG"; continue; }
-  : > "$out"
+  : > "$out"; fail_reason=""
   echo "[$(date +%H:%M:%S)] $label $d (vector=$e store=${needstore:-no})" | tee -a "$LOG"
   if ! up_engine "$e" "$mem" "$memswap" "$cpus" "$cache"; then
     st=$(dead_reason "$e")
     "$PY" -c "import json;open('$out','a').write(json.dumps({'kind':'s6','deployment':'$d','envelope':'$label','status':'$st'})+chr(10))"
-    echo "  -> $st" | tee -a "$LOG"; down_engine "$e"; touch "$donef"; continue
+    echo "  -> $st" | tee -a "$LOG"; down_engine "$e" "$st"; touch "$donef"; continue
   fi
   storeargs=""
   if [ -n "$needstore" ]; then
