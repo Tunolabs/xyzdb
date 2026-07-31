@@ -7,6 +7,15 @@ All notable changes to xyzDB are documented here. Format based on [Keep a Change
 ## [Unreleased]
 
 ### Added
+- **Sub-gravity axis — declaration surface (`SATELLITE BY <field> IN "lobe"`).**
+  A third foundational axis, sibling to gravity and vector: names the single
+  field whose value sub-buckets a gravity bucket via the reserved `sat` axis of
+  the spatial key. One axis per lobe; declared on an empty lobe (refused on a
+  non-empty one). This release ships declaration only — grammar, D1-durable
+  persistence, boot reload, and the guards. **Placement is not yet active**: a
+  declared satellite is behaviourally inert (every record still lands in the
+  default sub-bucket), so nothing observable changes until the placement phase.
+  See `docs/xytalk-spec.md` §2.2.2.
 - `NEAREST` responses truncated by the latency airbag (`--nearest-budget-ms`)
   now carry a `budget_stop` object (`examined` / `candidates` / `found`) — the
   counts at the cut, turning the `has_more` inference into a fact. Present ONLY

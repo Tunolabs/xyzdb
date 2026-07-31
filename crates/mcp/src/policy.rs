@@ -82,6 +82,7 @@ pub fn classify(stmt: &Statement) -> StatementClass {
         | Statement::Anchor(_)
         | Statement::Gravity(_)
         | Statement::Vector(_)
+        | Statement::Satellite(_)
         | Statement::Lobe(_)
         | Statement::AutoAnchorApply(_)
         | Statement::CreateGhost(_)

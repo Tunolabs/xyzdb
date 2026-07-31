@@ -24,6 +24,12 @@ pub enum Statement {
     /// field (hoisted to the V3 record prefix for exact NEAREST). A foundational
     /// axis sibling to gravity, not an index.
     Vector(VectorStmt),
+    /// `SATELLITE BY <field> IN "<lobe>"` — declare the lobe's sub-gravity axis:
+    /// the single field whose value sub-buckets a large gravity bucket, so a
+    /// bounded query scans one satellite instead of the whole parent. A
+    /// foundational axis sibling to gravity/vector; one per lobe; declared on an
+    /// empty lobe. See `docs/xytalk-spec.md` §2.21.
+    Satellite(SatelliteStmt),
     Lobe(LobeStmt),
     Show(ShowStmt),
     AutoAnchorApply(AutoAnchorApplyStmt),
@@ -232,6 +238,15 @@ pub struct AnchorStmt {
 /// `VECTOR <field> IN "<lobe>"` — names the lobe's searchable embedding field.
 #[derive(Debug, Clone, PartialEq)]
 pub struct VectorStmt {
+    pub field: String,
+    pub lobe: String,
+}
+
+/// `SATELLITE BY <field> IN "<lobe>"` — names the lobe's sub-gravity axis: the
+/// single field whose value splits a gravity bucket into ordered sub-buckets.
+/// One field, `BY` keyword like gravity, single value like vector.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SatelliteStmt {
     pub field: String,
     pub lobe: String,
 }

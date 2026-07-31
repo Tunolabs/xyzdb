@@ -21,6 +21,7 @@ pub(crate) mod planner;
 pub(crate) mod record_cache;
 pub(crate) mod reserved_keys;
 pub(crate) mod rollup_merge;
+pub(crate) mod satellite_spec;
 pub(crate) mod scan_telemetry;
 pub(crate) mod sort_encoding;
 pub mod stats;

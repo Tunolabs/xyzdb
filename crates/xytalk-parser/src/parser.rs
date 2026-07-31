@@ -353,6 +353,9 @@ fn parse_single_statement(input: &str) -> Result<Statement, XyzError> {
     } else if upper.starts_with("VECTOR") {
         let (_, stmt) = parse_vector(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
         Ok(Statement::Vector(stmt))
+    } else if upper.starts_with("SATELLITE") {
+        let (_, stmt) = parse_satellite(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        Ok(Statement::Satellite(stmt))
     } else if upper.starts_with("LOBE") {
         let (_, stmt) = parse_lobe(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
         Ok(Statement::Lobe(stmt))
@@ -1225,6 +1228,25 @@ fn parse_vector(input: &str) -> IResult<&str, VectorStmt> {
     Ok((
         input,
         VectorStmt {
+            field: field.to_string(),
+            lobe,
+        },
+    ))
+}
+
+// ─── SATELLITE BY ────────────────────────────────────────────────────────────
+
+/// `SATELLITE BY <field> IN "<lobe>"` — a single field, `BY` like gravity but a
+/// bare identifier (no transform/composite) like vector.
+fn parse_satellite(input: &str) -> IResult<&str, SatelliteStmt> {
+    let (input, _) = ws(kw("SATELLITE"))(input)?;
+    let (input, _) = ws(kw("BY"))(input)?;
+    let (input, field) = ws(identifier)(input)?;
+    let (input, _) = ws(kw("IN"))(input)?;
+    let (input, lobe) = ws(quoted_string)(input)?;
+    Ok((
+        input,
+        SatelliteStmt {
             field: field.to_string(),
             lobe,
         },

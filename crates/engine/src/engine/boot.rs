@@ -203,6 +203,7 @@ impl Engine {
         let (gravity_fields, gravity_needs_migration) =
             Self::load_gravity_fields(&turba.dictionary, &lobe_registry);
         let vector_fields = Self::load_vector_fields(&turba.dictionary, &lobe_registry);
+        let satellite_fields = Self::load_satellite_fields(&turba.dictionary, &lobe_registry);
         if gravity_needs_migration {
             tracing::warn!(
                 "gravity: pre-D1 (name+value) spec slot(s) detected — data ops are blocked \
@@ -271,6 +272,7 @@ impl Engine {
                 .filter(|r| (0.0..=1.0).contains(r))
                 .unwrap_or(0.01),
             vector_fields: RwLock::new(vector_fields),
+            satellite_specs: RwLock::new(satellite_fields),
             gravity_needs_migration: std::sync::atomic::AtomicBool::new(gravity_needs_migration),
             dict_store: RwLock::new(dict_store),
             field_registry: RwLock::new(field_registry),

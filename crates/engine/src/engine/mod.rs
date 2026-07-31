@@ -113,6 +113,14 @@ pub struct Engine {
     /// the V3 record prefix for exact NEAREST. Persisted in the dictionary
     /// keyspace under `reserved_keys::VECTOR_FIELD`. NOT an index/IVF.
     pub(crate) vector_fields: RwLock<HashMap<String, crate::vector_spec::VectorSpec>>,
+    /// Sub-gravity axis (third sibling to gravity/vector): per-lobe satellite
+    /// field (lobe_name → SatelliteSpec). Declared by `SATELLITE BY <field> IN
+    /// "lobe"` on an EMPTY lobe; names the field whose value sub-buckets the
+    /// gravity bucket via the reserved `sat` axis of the spatial key. Persisted
+    /// under `reserved_keys::SATELLITE`. Declaration-only in this phase — write
+    /// placement (`hash16` into `sat`) and bounded reads are a later phase, so
+    /// today a declared spec is inert (every record still lands in sat 0).
+    pub(crate) satellite_specs: RwLock<HashMap<String, crate::satellite_spec::SatelliteSpec>>,
     /// D1: set at open when any persisted gravity slot is pre-D1 (name+value,
     /// format byte 0x01/0x02). While true the engine refuses gravity data ops
     /// (PUT/SCAN/FIND/…) with a "run migrate" error, so it never silently reads
@@ -199,6 +207,7 @@ mod dispatch;
 mod ghosts;
 mod gravity;
 mod maintenance;
+mod satellites;
 mod vectors;
 mod verbs;
 /// Test-only MIGRATE crash-injection knobs (durability gate). No-ops in

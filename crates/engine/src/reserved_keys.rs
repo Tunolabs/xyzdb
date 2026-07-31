@@ -45,6 +45,13 @@ pub(crate) const GRAVITY: [u8; 2] = [0xFF, 0xFA];
 /// hoisted to the V3 record prefix for exact NEAREST. Not an index/IVF.
 pub(crate) const VECTOR_FIELD: [u8; 2] = [0xFF, 0xF7];
 
+/// Per-lobe sub-gravity (satellite) axis registry, keyed by `lobe_id`
+/// (`[SATELLITE][lobe_id:2]`). Value is `[MAGIC][0x01][postcard(SatelliteSpec)]`.
+/// Third foundational axis, sibling to [`GRAVITY`] (placement) and
+/// [`VECTOR_FIELD`] (search): names the field whose value sub-buckets a gravity
+/// bucket via the reserved `sat` axis of the spatial key. Not an index.
+pub(crate) const SATELLITE: [u8; 2] = [0xFF, 0xF5];
+
 /// Per-lobe V2 field-name registry, keyed by `lobe_id`
 /// (`[FIELD_REGISTRY][lobe_id:2]`). Value shape is identical to [`PIN`].
 pub(crate) const FIELD_REGISTRY: [u8; 2] = [0xFF, 0xFB];
@@ -124,6 +131,11 @@ pub(crate) const RESERVED: &[ReservedKeyspace] = &[
     ReservedKeyspace {
         name: "VECTOR_FIELD",
         prefix: VECTOR_FIELD,
+        disambiguator: Disambiguator::Exclusive,
+    },
+    ReservedKeyspace {
+        name: "SATELLITE",
+        prefix: SATELLITE,
         disambiguator: Disambiguator::Exclusive,
     },
     ReservedKeyspace {

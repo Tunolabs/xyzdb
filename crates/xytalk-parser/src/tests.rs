@@ -759,6 +759,27 @@ fn parse_vector_requires_in_and_lobe() {
     assert!(parse(r#"VECTOR IN "mem""#).is_err());
 }
 
+// ─── SATELLITE BY (sub-gravity axis) ──────────────────────────────────────
+
+#[test]
+fn parse_satellite_field() {
+    assert_eq!(
+        parse(r#"SATELLITE BY kind IN "events""#).unwrap(),
+        Statement::Satellite(SatelliteStmt {
+            field: "kind".into(),
+            lobe: "events".into(),
+        })
+    );
+}
+
+#[test]
+fn parse_satellite_requires_by_in_and_lobe() {
+    assert!(parse("SATELLITE kind").is_err());
+    assert!(parse(r#"SATELLITE BY IN "events""#).is_err());
+    assert!(parse(r#"SATELLITE kind IN "events""#).is_err());
+    assert!(parse("SATELLITE BY kind").is_err());
+}
+
 // ─── GRAVITY BY (v0.8 keel) ───────────────────────────────────────────────
 
 #[test]

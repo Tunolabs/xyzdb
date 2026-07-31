@@ -35,6 +35,7 @@ impl Engine {
             Statement::Anchor(s) => self.execute_anchor(s),
             Statement::Gravity(s) => self.execute_gravity(s),
             Statement::Vector(s) => self.execute_vector(s),
+            Statement::Satellite(s) => self.execute_satellite(s),
             Statement::Lobe(s) => self.execute_lobe(s),
             Statement::Show(s) => self.execute_show(s),
             Statement::AutoAnchorApply(s) => self.execute_autoanchor_apply(s),
@@ -190,6 +191,7 @@ impl Engine {
             | Statement::Anchor(_)
             | Statement::Gravity(_)
             | Statement::Vector(_)
+            | Statement::Satellite(_)
             | Statement::Lobe(_)
             | Statement::Show(_)
             | Statement::AutoAnchorApply(_)
