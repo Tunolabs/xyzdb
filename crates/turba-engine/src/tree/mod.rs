@@ -427,6 +427,28 @@ impl Tree {
             (Version::new(), 1, 0)
         };
 
+        // Table ids must be monotonic ACROSS restarts, not just within a process.
+        //
+        // `next_table_id` is only made durable by `persist_manifest`, which runs
+        // AFTER the tables are installed in the live Version and not at all while
+        // compaction is disabled (BULKMODE). So a crash in that window — or a bulk
+        // load that exits without a major compaction — leaves `NNNNNN.sst` on disk
+        // while the manifest still says `next_table_id = NNNNNN`. Orphan `.sst`
+        // files are not swept at open (only `.sst.tmp` is), so the next flush mints
+        // the same id and `sst_path` resolves to the SAME FILENAME.
+        //
+        // Nothing silently corrupts today: a reusable id is by construction absent
+        // from every persisted manifest, so it is never live in a Version and the
+        // caches (keyed by `(tree_id, table_id)`, with no generation) cannot serve
+        // one table's blocks for another. But the safety rests on that argument
+        // rather than on an invariant, and the same identity being handed out twice
+        // is a hazard for anything keyed by it — the block cache, the meta cache,
+        // orphan cleanup, `FlushIdGuard`. So make it impossible instead of merely
+        // unreachable, mirroring the `max` reconciliation `seqno` already gets in
+        // `TurbaEngine::open`. Cost is one `read_dir` at open, on a directory that
+        // is already enumerated for `.sst.tmp` cleanup.
+        let next_table_id = next_table_id.max(Self::max_on_disk_table_id(path) + 1);
+
         let warmup_stats = WarmupStats {
             wall_ms: warmup_start.elapsed().as_millis() as u64,
             bytes_loaded: warmup_bytes_acc,
@@ -1708,8 +1730,13 @@ impl Tree {
     /// inode alive until the last descriptor closes, so in-flight reads
     /// complete correctly. Errors from `remove_file` are silently swallowed —
     /// a missing file simply means a prior cycle already cleaned it up, and
-    /// `cleanup_orphan_ssts` will sweep any genuinely missed files on the
-    /// next startup.
+    /// `cleanup_orphan_ssts` will sweep any genuinely missed files on the next
+    /// MAJOR COMPACTION — not at startup: it is only called from
+    /// `major_compact_with_observer`, and open cleans `.sst.tmp` debris only. An
+    /// engine that never runs a major compaction therefore accumulates orphans.
+    /// They are inert (absent from every persisted manifest, so never opened) and
+    /// since table ids are reconciled at open they can no longer have their id
+    /// reused either — but they do occupy disk until a major compaction sweeps them.
     fn delete_compacted_inputs(&self, ids: &[u64]) {
         for id in ids {
             let path = self.path.join(format!("{id:06}.sst"));
@@ -2044,6 +2071,27 @@ impl Tree {
                 .count(),
             Err(_) => 0,
         }
+    }
+
+    /// Highest table id present as `NNNNNN.sst` in `path`, or 0 if none.
+    ///
+    /// Used at open to keep table ids monotonic across restarts even when the
+    /// manifest that would have recorded them never became durable. Ignores
+    /// `.sst.tmp` (crash debris, cleaned separately) and unparseable names.
+    fn max_on_disk_table_id(path: &Path) -> u64 {
+        std::fs::read_dir(path)
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .filter_map(|e| {
+                        let name = e.file_name();
+                        let name = name.to_str()?;
+                        name.strip_suffix(".sst")?.parse::<u64>().ok()
+                    })
+                    .max()
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0)
     }
 
     fn sst_path(&self, table_id: u64) -> PathBuf {
