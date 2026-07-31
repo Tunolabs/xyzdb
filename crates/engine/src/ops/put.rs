@@ -438,6 +438,10 @@ fn execute_upsert(
         crate::ops::deserialize_hydrated(engine, &sk_array, &record_bytes, lobe_name, fd)?;
     drop(fd_ref);
 
+    // P10: snapshot the pre-merge record so the ghost update can compute the
+    // aggregate delta (subtract old, add new). Cheap clone, once per upsert.
+    let old_record = record.clone();
+
     // Merge new fields into existing
     for (k, v) in new_fields {
         record.fields.insert(k.clone(), v.clone());
@@ -484,13 +488,29 @@ fn execute_upsert(
         .commit()
         .map_err(|e| XyzError::Storage(format!("put update commit failed: {e}")))?;
 
-    // TODO(ghost-upsert-notify): this ON CONFLICT UPDATE path does NOT call
-    // ghost_manager.notify_write, so ghosts do not reflect an upsert — a
-    // covering ghost keeps the pre-upsert record and an aggregate ghost keeps
-    // stale sums/counts until REFRESH. Distinct from the re-gravitation
-    // dangling-entry class (this writes in place, no key move); its own fix
-    // step. Symptom: SCAN GHOST / precomputed aggregates diverge from primary
-    // after a `PUT ... ON CONFLICT UPDATE`.
+    // P10 (was TODO(ghost-upsert-notify)): notify ghosts of the in-place update
+    // so covering ghosts refresh the record and aggregate ghosts adjust their
+    // sums/counts via the old_record → record delta — previously they kept
+    // stale values until REFRESH. This path writes in place (no re-bucket), so
+    // the old and new spatial keys are the same `sk_array` (unlike SET, which
+    // may re-gravitate).
+    engine.ghost_manager.notify_write(
+        lobe_id,
+        &record,
+        &sk_array,
+        crate::ghost::WriteType::Update {
+            old_record,
+            old_spatial_key: sk_array.to_vec(),
+        },
+    );
+
+    // Sibling of P10 (same "upsert doesn't propagate" class): the upsert also
+    // skipped the RecordCache write-through that insert (above) and SET both do,
+    // so a cached read returned the pre-upsert record. Mirror them.
+    if let Some(cache) = &engine.record_cache {
+        cache.update_record(lobe_id, &record);
+    }
+
     Ok(QueryResult::Ok {
         lid: Some(existing_lid),
         message: format!("1 record updated (LID: {})", existing_lid),
