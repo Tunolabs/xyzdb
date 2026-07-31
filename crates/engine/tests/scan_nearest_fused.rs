@@ -751,3 +751,86 @@ fn m23_abundant_residual_stays_complete_records() {
         "abundant fused residual must match the full path"
     );
 }
+
+// ─── A/B step 1: the accumulator refactor must not move a single row ─────────
+
+/// The fused path's accumulator became a bounded top-k heap (so a later
+/// key-ordered pass can use it). A heap pops in the OPPOSITE order to the prefix
+/// it replaced, so the output order is re-established by an explicit final sort.
+/// If that sort is wrong, or missing, ties resolve differently and the k-th row
+/// silently becomes a different record.
+///
+/// Ties are the whole point and they are not hypothetical: identical digests give
+/// identical vectors and therefore EXACTLY equal scores. Here more records tie than
+/// fit in k, so the tie-break decides the CUT itself, not just the ordering — the
+/// sharpest form of the check.
+///
+/// Asserted ROW FOR ROW against the unfused full path, which did not change. A
+/// "same set" assertion would pass while the order silently inverted, and that is
+/// precisely the mistake this gate exists to catch.
+#[test]
+fn ab_step1_accumulator_keeps_the_fused_path_bit_identical_under_ties() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    exec(&engine, r#"LOBE "mem""#);
+    exec(&engine, r#"VECTOR emb IN "mem""#);
+
+    // One vector shared by MANY records → exactly equal scores against the query.
+    let mut tied = vec![0.0f32; DIM];
+    tied[0] = 1.0;
+    // 9 tied records that pass the residual, k = 4 → the tie-break picks the cut.
+    for i in 0..9 {
+        exec(
+            &engine,
+            &format!(
+                r#"PUT {{*conv:"c1", id:"tie{i}", keep:"yes", emb:{}}} IN "mem""#,
+                vec_literal(&tied)
+            ),
+        );
+    }
+    // Same tied vector but FAILING the residual: they must never appear, and they
+    // force the hydrate-until-k path (a predicate on a non-gravity field).
+    for i in 0..6 {
+        exec(
+            &engine,
+            &format!(
+                r#"PUT {{*conv:"c1", id:"drop{i}", keep:"no", emb:{}}} IN "mem""#,
+                vec_literal(&tied)
+            ),
+        );
+    }
+    // Distinct, farther vectors so the top-k is not the whole bucket.
+    for i in 0..20 {
+        let mut v = vec![0.0f32; DIM];
+        v[(i % (DIM - 1)) + 1] = 1.0;
+        exec(
+            &engine,
+            &format!(
+                r#"PUT {{*conv:"c1", id:"far{i}", keep:"yes", emb:{}}} IN "mem""#,
+                vec_literal(&v)
+            ),
+        );
+    }
+
+    let q = format!(
+        r#"SCAN "mem" WHERE conv="c1" AND keep="yes" | NEAREST(emb, {}, 4, cosine)"#,
+        vec_literal(&tied)
+    );
+
+    let fused = lids(exec(&engine, &q));
+    let full: Vec<LID> = full_path(&engine, &q).into_iter().map(|r| r.lid).collect();
+
+    assert_eq!(fused.len(), 4, "top-4 expected, got {}", fused.len());
+    assert_eq!(
+        fused, full,
+        "fused and full-path top-k diverged ROW FOR ROW under ties — the \
+         accumulator's final ordering is not the full path's (score desc, lid asc)"
+    );
+
+    // And the residual still holds: nothing marked keep="no" may appear.
+    let got_ids = ids(exec(&engine, &q));
+    assert!(
+        got_ids.iter().all(|i| !i.starts_with("drop")),
+        "a record failing the residual leaked into the top-k: {got_ids:?}"
+    );
+}

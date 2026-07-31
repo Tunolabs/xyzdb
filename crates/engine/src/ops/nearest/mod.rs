@@ -594,7 +594,24 @@ fn try_prefix_scan_nearest(
     // FULL filter, and keep passers until k (hydrate-until-k). Either way,
     // materialize by re-fetching each blob by spatial key (a point-get) — the heap
     // held the 22-byte key, never a per-record blob clone.
-    let mut out = Vec::with_capacity(k.min(cands.len()));
+    // STEP 1 of the A/B switch — accumulator only, no behaviour change.
+    //
+    // Was a prefix `Vec<Record>`: correct ONLY because `cands` is score-ordered, so
+    // "the first k pushed" happened to equal "the top k". That coupling is what
+    // blocks a key-ordered pass (B), where a later candidate can outrank an earlier
+    // one. So the accumulator becomes a bounded top-k heap and the OUTPUT ORDER is
+    // re-established explicitly at the end.
+    //
+    // It reuses `Scored` — the very struct and ordering the unfused full path uses —
+    // and the final sort below is character-for-character the full path's. That is
+    // deliberate: the fused path contracts to produce a BIT-IDENTICAL top-k to the
+    // full path, and the cheapest way to keep that true is to share the machinery
+    // rather than to re-derive an equivalent one. A heap pops in the opposite order,
+    // so without that explicit final sort the tie-break silently inverts: equal
+    // scores are not hypothetical (identical digests give identical vectors, which
+    // devva produces), and the k-th row would quietly become a different record.
+    let mut heap: std::collections::BinaryHeap<Scored> =
+        std::collections::BinaryHeap::with_capacity(k + 1);
     // Hydration truncation flag (M2.3). Because hydration walks `cands` in score
     // order, whatever is in `out` is always the highest-scoring passers so far —
     // so if the budget cuts here, the partial is PREFIX-CORRECT (an exact prefix
@@ -611,7 +628,7 @@ fn try_prefix_scan_nearest(
     let candidates = cands.len();
     let mut examined = 0usize;
     for c in cands {
-        if has_residual && out.len() == k {
+        if has_residual && heap.len() == k {
             break; // k winners found — stop hydrating (the whole point).
         }
         scanned += 1;
@@ -701,9 +718,26 @@ fn try_prefix_scan_nearest(
             // the scan (no extra point-get). V3/V4 survivors carry it inline.
             xyzdb_core::record::hydrate_vector(&mut record, column, dict);
         }
-        out.push(record);
+        heap.push(Scored {
+            score: c.score,
+            rec: record,
+        });
+        if heap.len() > k {
+            heap.pop(); // drops the worst; `Scored`'s Ord surfaces it
+        }
     }
     drop(fr_guard);
+
+    // Re-establish the output order EXPLICITLY. Identical to the full path's final
+    // sort (`execute_nearest`): most similar first, ties by ascending lid.
+    let mut scored = heap.into_vec();
+    scored.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(Ordering::Equal)
+            .then(a.rec.lid.cmp(&b.rec.lid))
+    });
+    let out: Vec<Record> = scored.into_iter().map(|s| s.rec).collect();
     // budget_stop is Some ONLY when the airbag cut the hydration tail — the one
     // case where `has_more=true` is a budget stop, not a resumable page. Turns
     // "there may be more" into "examined E of C candidates, found F".
