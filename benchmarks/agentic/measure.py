@@ -21,6 +21,23 @@ import time
 import numpy as np
 import xyzdb_minimal as xyzdb
 
+import recall_harness as rh
+
+# ── TIE-AWARE recall (2026-08-01) ────────────────────────────────────────────
+# Recall compares SCORES against the k-th in-bucket cutoff, not id sets. An id
+# intersection punishes an exact engine for returning a DIFFERENT row that scores
+# identically — a legitimate answer counted wrong — and xyzDB is exact, so it must
+# read 1.000 or the exactness gate is meaningless.
+#
+# Measured on this corpus before changing anything, because a fix nobody needed
+# would be theatre: boundary ties (|s[k-1]-s[k]| within engine-level tolerance)
+# occur in 0% of queries at 500 buckets, 4.2% at 50, 5.8% at 5. So the id gate was
+# NOT lying at the v1 point — and it starts lying the moment the locality axis
+# coarsens, which is exactly where v2 measures. The defect arrives with the axis.
+#
+# The cutoff is derived from the stored oracle ids (their lowest score), so no
+# corpus needs regenerating. See `recall_harness.TIE_TOL` for the calibration.
+
 CHUNK = 600  # records per PUT BATCH; full-precision 1024-d floats ~22 KB/rec → ~13 MB < 16 MiB frame
 
 
@@ -175,14 +192,15 @@ def run_query(args, c) -> dict:
     sampler = PeakSampler(args.container)
     sampler.start()
     lat_ms, recalls = [], []
+    vecs = c["vecs"]  # tie-aware recall scores the returned rows; see TIE-AWARE note above
+    cuts = [rh.cutoff_from_oracle_ids(qvecs[j], oracle[j], vecs) for j in range(nq)]
     for _ in range(max(1, args.repeats)):
         for j in range(nq):
-            oid = {f"g{int(x)}" for x in oracle[j]}
             t0 = time.perf_counter()
             recs = _nearest(db, args.lobe, f"b{int(qbucket[j])}", qvecs[j], k)
             lat_ms.append((time.perf_counter() - t0) * 1e3)
-            got = {r["id"] for r in recs if "id" in r}
-            recalls.append(len(got & oid) / k)
+            got = [int(r["id"][1:]) for r in recs if str(r.get("id", "")).startswith("g")]
+            recalls.append(rh.tie_aware_recall(qvecs[j], got, vecs, cuts[j], k))
     peak = sampler.stop()
     # Phase boundary: read the engine's invariant guards BEFORE emitting. A fired
     # guard fails the cell — a latency/recall number taken while a correctness
@@ -245,14 +263,15 @@ def run_both(args, c) -> list:
     sampler = PeakSampler(args.container)
     sampler.start()
     lat_ms, recalls = [], []
+    vecs = c["vecs"]  # tie-aware recall scores the returned rows; see TIE-AWARE note above
+    cuts = [rh.cutoff_from_oracle_ids(qvecs[j], oracle[j], vecs) for j in range(nq)]
     for _ in range(max(1, args.repeats)):
         for j in range(nq):
-            oid = {f"g{int(x)}" for x in oracle[j]}
             t0 = time.perf_counter()
             recs = _nearest(db, args.lobe, f"b{int(qbucket[j])}", qvecs[j], k)
             lat_ms.append((time.perf_counter() - t0) * 1e3)
-            got = {r["id"] for r in recs if "id" in r}
-            recalls.append(len(got & oid) / k)
+            got = [int(r["id"][1:]) for r in recs if str(r.get("id", "")).startswith("g")]
+            recalls.append(rh.tie_aware_recall(qvecs[j], got, vecs, cuts[j], k))
     peak = sampler.stop()
     # Boundary 1: covers load + query in the ORIGINAL process.
     qguards = assert_no_invariant_guards(args.host, args.port, "both/query phase")

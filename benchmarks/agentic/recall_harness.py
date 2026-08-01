@@ -14,9 +14,22 @@ ABOVE it — otherwise the exactness gate fails on benign cross-implementation r
 """
 import numpy as np
 
-# Set from measure_precision_gap on the real corpus (see checkpoint). Default is a safe
-# upper bound for 1024-d f32-vs-f64 dot accumulation (~n·eps·|x| ≈ 1024·6e-8 ≈ 6e-5).
-TIE_TOL = 2e-4
+# CALIBRATED 2026-08-01 against the real corpus, as this module's docstring always
+# asked for. `measure_precision_gap` over all 500 queries at three points of the
+# locality axis gives a worst f32-vs-f64 accumulation gap of **1.037e-07**, and it
+# barely moves with bucket size (8.61e-08 at ~493/bucket, 9.06e-08 at ~4.9k,
+# 1.04e-07 at ~49k) because the gap is driven by the 1024 dimensions of one dot
+# product, not by how many vectors are scored.
+#
+# 1e-5 is ~100x that floor: comfortably above the noise, so an exact engine is never
+# failed for benign cross-implementation rounding.
+#
+# The previous 2e-4 was an uncalibrated safe upper bound — **1929x** the measured
+# gap — and being too wide is not free. A tolerance forgives every score within it,
+# so at 2e-4 the gate credited an engine for returning rows whose scores were
+# genuinely different (measured: 4.2% of queries at 500 buckets, 8.3% at 5). Too
+# wide over-reports rivals exactly as too narrow under-reports the exact engine.
+TIE_TOL = 1e-5
 
 
 def exact_scores(q: np.ndarray, vecs: np.ndarray) -> np.ndarray:
@@ -45,6 +58,17 @@ def kth_oracle_score(q: np.ndarray, bucket_vecs: np.ndarray, k: int) -> float:
     s = exact_scores(q, bucket_vecs)
     s.sort()
     return float(s[max(0, len(s) - k)])
+
+
+def cutoff_from_oracle_ids(q, oracle_ids, corpus_vecs) -> float:
+    """The k-th best in-bucket score, derived from the stored top-k ids.
+
+    The corpus archives carry `oracle` as row indices, not scores. Those ids ARE
+    the true top-k, so the k-th score is simply the lowest among them — no new
+    field, no corpus regeneration, and every existing .npz keeps working. Use this
+    to feed `cut` to :func:`tie_aware_recall`.
+    """
+    return float(exact_scores(q, corpus_vecs[list(oracle_ids)]).min())
 
 
 def tie_aware_recall(q, returned_ids, corpus_vecs, cut, k, tol=None) -> float:

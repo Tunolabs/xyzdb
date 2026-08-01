@@ -17,6 +17,7 @@ import threading
 import time
 
 import numpy as np
+import recall_harness as rh
 from adapters import ADAPTERS
 
 PORTS = {"xyzdb": 2505, "pgvector": 5432, "qdrant": 6333, "chroma": 8000}
@@ -210,13 +211,20 @@ def do_query(adapter, args, c, load_s):
         adapter.query(qvecs[j], int(qbucket[j]), k)
     sampler = PeakSampler(args.container); sampler.start()
     lat, rec = [], []
+    # TIE-AWARE recall: compare SCORES against the k-th in-bucket cutoff, not id
+    # sets. An id intersection marks an exact engine wrong for returning a different
+    # row with an identical score. Measured before changing it: boundary ties occur
+    # in 0% of queries at 500 buckets, 4.2% at 50, 5.8% at 5 — so the id gate held
+    # at the v1 point and breaks exactly where the locality axis takes v2. The
+    # cutoff comes from the stored oracle ids, so no corpus is regenerated.
+    vecs = c["vecs"]
+    cuts = [rh.cutoff_from_oracle_ids(qvecs[j], oracle[j], vecs) for j in range(nq)]
     for _ in range(max(1, args.repeats)):
         for j in range(nq):
-            oid = {int(x) for x in oracle[j]}
             t0 = time.perf_counter()
             got = adapter.query(qvecs[j], int(qbucket[j]), k)
             lat.append((time.perf_counter() - t0) * 1e3)
-            rec.append(len(set(got) & oid) / k)
+            rec.append(rh.tie_aware_recall(qvecs[j], [int(x) for x in got], vecs, cuts[j], k))
     peak = sampler.stop()
     a = np.array(lat)
     return {"kind": "query", "engine": args.engine, "envelope": args.envelope,
