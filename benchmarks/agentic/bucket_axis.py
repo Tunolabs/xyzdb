@@ -1,5 +1,34 @@
 #!/usr/bin/env python3
-"""The bucket-size axis: regroup the SAME corpus, regenerate the truth per point.
+"""The locality-granularity axis: tenant isolation vs shared pool.
+
+WHAT THE AXIS ACTUALLY IS (read this before reading the numbers)
+---------------------------------------------------------------
+Regrouping does **not** make users bigger — it pools users into a shared bucket.
+500 buckets is one user per bucket; 50 buckets is **ten users sharing one**. So
+"50 users with 5k memories each" would be a lie: it is 500 users, ten to a bucket.
+
+The query keeps naming **the user**, which is the honest choice, so pooling turns
+the user into a **residual filter inside a larger bucket**. That gives the axis its
+real business name: the decision every SaaS architect makes — schema per tenant vs
+one shared schema with a `tenant_id` — measured end to end.
+
+    500 buckets   ~493/bucket    USER        total isolation; the query names its gravity
+     50 buckets  ~4,935/bucket   GROUP       ten tenants per partition; user goes residual
+      5 buckets ~49,348/bucket   BIG GROUP   a hundred tenants per partition
+      1 bucket  246,738          POOL        one shared space; tenant_id is just a field
+
+**There is deliberately no "session" point**, though the corpus has 19,195 `sid` of
+~13 turns and it would have saved fabricating the fine end. It does not hold, and
+not for size: a query's answer is spread across **2 to 6 sessions in 59% of cases**
+(196 queries have one answer session, 283 have several). With gravity on the
+session, a query pins one and loses the rest *by construction* — recall capped
+below 1.0 for a reason that has nothing to do with any engine. LongMemEval is built
+that way on purpose; it is a long-term-memory benchmark and the needle is spread.
+(Size would have been survivable: 90.2% of queries have all their answer sessions
+holding >=10 turns.) A session is a co-location unit, not a query scope, and an axis
+of localities needs scopes. The fine end is **user** — equally natural, being the
+corpus's own 500 question-ids.
+
 
 WHY THIS EXISTS
 ---------------
@@ -47,9 +76,19 @@ import recall_harness as rh
 _HERE = os.path.dirname(os.path.abspath(__file__))
 CORP = os.environ.get("BENCH_CORP", os.path.join(_HERE, "corpora", "lme"))
 
-# The declared points of the axis: how many buckets the 500 real ones collapse into.
-# 500 = the v1 accident (~493/bucket), 1 = one bucket holding the whole corpus.
+# The declared points of the axis: how many buckets the 500 real users collapse into.
+# 500 = one bucket per user (the v1 accident, ~493/bucket); 1 = every user pooled.
 AXIS_POINTS = (500, 50, 5, 1)
+
+# The business name of each point — carried into the record so a number is never
+# published without the architecture it describes.
+POINT_NAMES = {500: "user", 50: "group", 5: "big_group", 1: "pool"}
+POINT_MEANING = {
+    500: "total isolation: one tenant, one scope; the query names its gravity",
+    50: "ten tenants per partition; the user becomes a residual filter",
+    5: "a hundred tenants per partition",
+    1: "one shared space; tenant_id is just a field",
+}
 
 
 def regroup(qids, n_buckets: int) -> np.ndarray:
@@ -173,7 +212,11 @@ def assemble(n_buckets: int, k: int, limit: int, out_path: str) -> dict:
              q_bucket=q_bucket, oracle=oracle,
              meta=np.array([len(vecs), int(meta["dim"]), n_buckets, k]),
              axis=np.array([n_buckets, int(sizes.mean()), len(vecs)]))
-    return {"n_buckets": n_buckets, "turns": int(len(vecs)), "queries": int(len(qvecs)),
+    return {"n_buckets": n_buckets,
+            "point": POINT_NAMES.get(n_buckets, f"b{n_buckets}"),
+            "means": POINT_MEANING.get(n_buckets, ""),
+            "tenants_per_bucket": round(500 / n_buckets, 1),
+            "turns": int(len(vecs)), "queries": int(len(qvecs)),
             "bucket_min": int(sizes.min()), "bucket_mean": round(float(sizes.mean()), 1),
             "bucket_max": int(sizes.max()), "k": k, "out": out_path,
             "corpus_sha": hashlib.sha256(vecs[:64].tobytes()).hexdigest()[:16]}
