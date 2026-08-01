@@ -82,9 +82,18 @@ Syntax and semantics: `xytalk-spec.md`. Operational notes here.
 ```text
 LOBE "name"
 ANCHOR "field" UNIQUE IN "name"
+GRAVITY BY <field> IN "name"        -- on-disk co-location key
+SATELLITE BY <field> IN "name"      -- sub-divides one gravity bucket
+VECTOR <field> IN "name"            -- searchable embedding column
 ```
 
 Lobes are free to create; anchors are declared up front because they write a unique constraint on the lobe.
+
+The last three are **declarations of physical layout**, not indexes, and they are what decides whether a query is bounded or a full sweep:
+
+- **`GRAVITY BY`** picks the field whose value co-locates records on disk. It is the engine's central mechanism — an equality on it becomes a bounded range scan instead of a lobe sweep. It can also be declared per record with the `*` prefix on the first `PUT` (§2.2).
+- **`SATELLITE BY`** sub-divides each gravity bucket by a second field, so a query pinning **both** reads only the matching rows. A pure optimisation — same rows, same order — and **the lobe must be empty when you declare it**: existing records would stay in the default sub-bucket where a bounded query cannot reach them. One axis per lobe. Full rules in `docs/xytalk-spec.md` §2.2.2, including that `SET` re-places a record whose satellite field changed while `ON CONFLICT UPDATE` does not.
+- **`VECTOR`** declares an f32 embedding column for `NEAREST`. The engine never embeds; the caller supplies the vector.
 
 ### 2.2 PUT patterns
 
@@ -114,6 +123,8 @@ SCAN "creditos" WHERE rfc = "X" LIMIT 1000
 SCAN "creditos" WHERE rfc = "X" LIMIT 1000 CURSOR "AQEAAQ..."
 -- Returns:  records (next 1000), cursor = "AQ...", has_more = true | false
 ```
+
+**Not every `PaginatedRecords` is resumable — check `cursor`, not `has_more`.** A `NEAREST` cut short by the latency budget returns the *same shape* with `has_more: true` but **`cursor: null`**, plus a `budget_stop` object describing the cut. It is a partial answer, not a page: there is nothing to resume, because resuming would repeat the whole scoring pass. Branch on `cursor` being present; treating `has_more: true` alone as "call again with the token" leaves you with no token. See `docs/xytalk-spec.md` §2.20 for `budget_stop` and what its counts license you to conclude.
 
 **Constraints**:
 - Cursor + `ORDER BY` rejected (paginated sort is not yet implemented).
@@ -187,7 +198,9 @@ Engine exposes:
 - `TurbaEngine::total_compact_errors()` — monotonic count of failed compact cycles. Should be zero.
 - Per-tree: `Tree::compact_error_count()`, `Tree::l0_table_count()`, `Tree::sealed_memtable_count()`, `Tree::flushed_seqno()`.
 
-These are internal APIs. The `/stats` HTTP endpoint surfaces them as JSON for external scraping. See `architecture.md` §10.
+These are internal APIs. The `/stats` HTTP endpoint surfaces them as JSON for external scraping (it follows `--auth-token` like `GET /`); `/metrics`, `/health` and `/ready` are served on the wire path. See `architecture.md` §10.
+
+**Correctness signals, not capacity metrics.** `STATS` also carries `invariant_guards` — counters for states the read path assumes impossible — and `recovered_from_wal`, with matching `xyzdb_invariant_*` and `xyzdb_recovered_from_wal` series on `/metrics`. **Any non-zero `xyzdb_invariant_*` is an engine bug: page, do not tune.** They are emitted for every keyspace even at zero, because a missing series is indistinguishable from a scrape gap. `xyzdb_recovered_from_wal == 1` is different in kind — it reports a degraded *mode*, not a fault: a process that replayed WAL re-confirms anchor misses without the bloom for its whole life, which is correct but costs a level descent per miss until restart. Alerting thresholds are in `OPERATIONS.md` §5.
 
 ### 4.3 Benchmark harness
 
@@ -210,7 +223,7 @@ Scale `0.1` ≈ 14.7M records (primary), `1.0` ≈ 149M. See `scripts/run_aws_4e
 
 ### 5.1 Data directory format versions
 
-On-disk format is bumped on breaking changes. Current data is `MANIFEST_VERSION = 5` (turba-engine) and `GHOST_META_FORMAT = 0x09` (xyzdb-engine, the ghost-persistence format). v0.8.8 added the vectors keyspace and the V5 record format; a later format bump widened the on-disk key to 24 bytes with a reserved `sat` axis, taking `MANIFEST_VERSION` to 5. Opening data written by an older format fails with `Error::IncompatibleFormat` and a clear message pointing at re-ingest.
+On-disk format is bumped on breaking changes. Current data is `MANIFEST_VERSION = 5` (turba-engine) and `GHOST_META_FORMAT = 0x09` (xyzdb-engine, the ghost-persistence format). v0.8.8 added the vectors keyspace and the V5 record format; a later format bump widened the on-disk key to 24 bytes with a `sat` axis, taking `MANIFEST_VERSION` to 5. That axis was reserved while there were no users and **went live in 1.1 with `SATELLITE BY` — no format change was needed**, which is why 1.0 and 1.1 share `MANIFEST_VERSION = 5` and a 1.0.x data directory opens unchanged. Opening data written by an older format fails with `Error::IncompatibleFormat` and a clear message pointing at re-ingest.
 
 No in-place migration. If you need to preserve v0.2.0-alpha data, run a side-by-side v0.2.0-alpha binary, export to JSON, re-ingest with the current binary.
 

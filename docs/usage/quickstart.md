@@ -116,6 +116,7 @@ When you write `FIND`, the engine selects a path automatically:
 When you write `SCAN`, the engine picks the optimal scan source:
 
 - `SCAN "lobe" WHERE gravity = X [...]` → bounded range scan (the same fast path, exposed under a different verb for the iteration use case).
+- `SCAN "lobe" WHERE gravity = X AND satellite = Y [...]` → **narrower still**, if the lobe declared `SATELLITE BY <field>`. The satellite axis sub-divides each gravity bucket, so pinning both fields reads one sub-range instead of the whole bucket. Same rows, same order — it only changes how much is read. Opt-in per lobe and declared on an empty lobe; see `reference.md` §2.1.
 - `SCAN "lobe" WHERE [...]` matched by an existing ghost → ghost-driven scan, transparent to you.
 - `SCAN "lobe" WHERE [...]` not matched by any ghost → full primary scan, with telemetry tracking. If you keep running the same slow query, the engine notices and builds an automatic optimization ("ghost") in the background. Subsequent runs become fast — you do nothing.
 

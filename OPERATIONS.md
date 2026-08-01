@@ -2,7 +2,7 @@
 
 Operator runbook for xyzDB 1.0. This is the document an operator opens when running xyzDB in an internal deployment, without needing to read `docs/architecture.md` end-to-end.
 
-> **Status:** current as of 1.0 (2026-07-30). Covers single-node deployment, configuration, health checks, backup/restore, observability, and the operational caveats that still apply.
+> **Status:** current as of 1.1 (2026-08-01). Covers single-node deployment, configuration, health checks, backup/restore, observability, and the operational caveats that still apply. 1.1 is an in-place upgrade from 1.0 (§8) and adds two things an operator sees: the `xyzdb_invariant_*` / `xyzdb_recovered_from_wal` series (§5), and a one-time `REFRESH GHOST` if you run aggregate ghosts over lobes that take upserts (§8).
 
 ---
 
