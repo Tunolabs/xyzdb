@@ -24,7 +24,8 @@ Minor, not patch: new grammar, new response fields and new `STATS` / `/metrics` 
 
 - **A `UNIQUE` anchor can no longer be duplicated after an unclean restart.** A process that replayed WAL re-confirms an anchor miss without the bloom before trusting it. Has a declared cost while armed.
 - **Table ids are monotonic across restarts**, so one identity can never name two different table contents.
-- **`PUT … ON CONFLICT UPDATE` propagates to ghosts and the record cache**, so aggregate ghosts and cached reads reflect an upsert without a `REFRESH`.
+- **`PUT … ON CONFLICT UPDATE` notifies ghosts.** An upsert skipped the ghost hook, so an aggregate ghost kept serving its pre-upsert sums and counts as current. **Ghost state is persisted, so run `REFRESH GHOST` once after upgrading** for aggregate ghosts over lobes that take upserts — the fix stops new drift, it does not repair drift already recorded.
+- **`PUT … ON CONFLICT UPDATE` writes through the record cache.** A cached read could return the record as it was before the upsert — a read-your-own-write violation. The cache is in-memory, so the upgrade restart clears any staleness; no action needed.
 
 ## [1.0.0] — 2026-07-30 (1.0 launch)
 

@@ -33,3 +33,13 @@ with xyzdb.connect("127.0.0.1", 2505) as db:
     db.put_batch("notes", [{"*topic": "greetings", "id": "n1", "text": "hello"}])
     rows = db.execute('SCAN "notes" WHERE id = $i', {"i": "n1"})
 ```
+
+**`execute()` hands you the decoded response verbatim, and that includes the
+markers that say an answer is incomplete.** Nothing here interprets them for you,
+which is the point of a reference client — and also the one place to be careful.
+A `NEAREST` cut short by the server's latency budget comes back with
+`has_more: true` and a `budget_stop` object; a paged `SCAN` comes back with
+`has_more` and a `cursor`. Read `resp.get("budget_stop")` and `resp["has_more"]`
+before treating `resp["records"]` as the whole answer, or use one of the
+installable clients above, which return a result type carrying those fields and
+warn when a partial is consumed unchecked.

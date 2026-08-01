@@ -177,7 +177,7 @@ Returns the count and an array of `{name, anchor_count, hint?}`. No arguments. E
 
 ### `describe_lobe`
 
-Composite schema introspection for a single lobe — anchors, ghosts (filtered by `source_lobe = name`), profile (pinned fields, learned scan patterns, active ghost count), and a top-level `vector`. One argument: `lobe: string` (validated non-empty pre-engine; missing lobe → `INVALID_PARAMS` top-level).
+Composite schema introspection for a single lobe — anchors, ghosts (filtered by `source_lobe = name`), profile (pinned fields, learned scan patterns, active ghost count), and the two declared axes hoisted to the top level, `vector` and `satellite`. One argument: `lobe: string` (validated non-empty pre-engine; missing lobe → `INVALID_PARAMS` top-level).
 
 `satellite` is `null` unless the lobe declares a sub-gravity axis (`SATELLITE BY <field>`), in which case it names that field. It is contract, not decoration: an equality on the axis reads one sub-range of the gravity bucket while a range sweeps the parent, so it tells an agent which query shape is cheap. `vector` is `null` when the lobe has no searchable embedding field, else `{"field": ..., "dim": ...}`. A `null` `dim` means the dimension is not fixed yet (declared, but no embedding written): an agent may choose it on the first write. A set `dim` means every `NEAREST` query vector must match it — the engine never embeds, so the caller supplies the vector.
 

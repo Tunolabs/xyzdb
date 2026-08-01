@@ -86,11 +86,13 @@ The `lid` is xyzDB's permanent record identifier. Agents that need to reference 
    "params":{"name":"describe_lobe","arguments":{"lobe":"creditos"}}}
 
 ← {"jsonrpc":"2.0","id":6,"result":{"content":[{"type":"text","text":
-     "{\n  \"name\": \"creditos\",\n  \"anchors\": [\n    {\n      \"name\": \"rfc\",\n      \"unique\": true\n    }\n  ],\n  \"ghosts\": [],\n  \"profile\": {\n    \"pinned_fields\": [],\n    \"learned_patterns\": [],\n    \"active_ghosts_count\": 0\n  },\n  \"vector\": null\n}"
+     "{\n  \"name\": \"creditos\",\n  \"anchors\": [\n    {\n      \"name\": \"rfc\",\n      \"unique\": true\n    }\n  ],\n  \"ghosts\": [],\n  \"profile\": {\n    \"pinned_fields\": [],\n    \"learned_patterns\": [],\n    \"active_ghosts_count\": 0\n  },\n  \"vector\": null,\n  \"satellite\": null\n}"
    }],"isError":false}}
 ```
 
 The three sub-fields (`anchors`, `ghosts`, `profile`) are independently fallible. If `SHOW GHOSTS` had failed mid-call, that field would carry `{"error": "..."}` while `anchors` and `profile` returned data normally.
+
+`vector` and `satellite` are the two declared axes, hoisted to the top level and `null` when the lobe declares neither. They are what let a caller pick a cheap query shape: an equality on the satellite field reads one sub-range of the gravity bucket, a range on it sweeps the parent. A caller that cannot see the axis cannot choose.
 
 ## 6. Query — anchor-bound point lookup
 

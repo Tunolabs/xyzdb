@@ -650,7 +650,9 @@ A small residue (~60 MB per run, asymptotic toward glibc arena steady state, not
 
 ## 8. Upgrade
 
-In-place upgrades between patch versions within a minor series. Cross-format migrations are called out in the corresponding release notes (e.g. the one-time v0.8.0 migration); a binary refuses to open a data dir whose `MANIFEST_VERSION` does not match.
+In-place upgrades are allowed whenever the on-disk format bytes match across the two versions — always within a patch series, and across a minor bump when that minor did not change them (**1.0 → 1.1 did not**, so it is in-place). Cross-format migrations are called out in the corresponding release notes (e.g. the one-time v0.8.0 migration); a binary refuses to open a data dir whose `MANIFEST_VERSION` does not match, so the check below is what decides, not the version number.
+
+A release may still ask for a **one-time action after** the upgrade without changing the format — 1.1 asks for a single `REFRESH GHOST` per aggregate ghost over a lobe that takes upserts (see [`docs/releases/v1.1.0.md`](docs/releases/v1.1.0.md)). Read the release note's Compatibility section as well as the format check.
 
 ### 8.1 What "in-place" means
 
