@@ -354,6 +354,48 @@ mod budget_stop_wire {
         // pass rate to the tail" reading is false for one of the two orders.
         assert_eq!(j["budget_stop"]["strategy"], json!("score_order"));
     }
+    /// The two hand-written serializers (server `json_response` and
+    /// `xyzdb-mcp::serialize`) must emit EXACTLY the fields of `BudgetStop`.
+    ///
+    /// They are parallel implementations of one response shape — a deliberate
+    /// trade (the MCP binary must not link the whole TCP server) whose known cost
+    /// is drift. That cost was paid: `strategy` shipped on the wire and was missing
+    /// from MCP, so an agent received a partial with no way to tell a PREFIX of the
+    /// answer from a sample of a key region. Adding the field fixes that instance;
+    /// this test closes the class.
+    ///
+    /// The oracle is the struct itself, via serde — not a list typed out here,
+    /// which would drift in the same way. Add a field to `BudgetStop` and this test
+    /// fails in BOTH crates until both serializers follow.
+    #[test]
+    fn budget_stop_emits_exactly_the_struct_fields() {
+        let bs = BudgetStop {
+            examined: 1,
+            candidates: 2,
+            found: 3,
+            strategy: xyzdb_core::result::ScanStrategy::ScoreOrder,
+        };
+        let canonical: std::collections::BTreeSet<String> =
+            match serde_json::to_value(&bs).expect("serialize BudgetStop") {
+                serde_json::Value::Object(m) => m.keys().cloned().collect(),
+                other => panic!("BudgetStop must serialize to an object, got {other:?}"),
+            };
+        let emitted: std::collections::BTreeSet<String> =
+            match &json_of(&QueryResult::PaginatedRecords {
+                records: vec![],
+                cursor: None,
+                has_more: true,
+                budget_stop: Some(bs),
+            })["budget_stop"]
+            {
+                serde_json::Value::Object(m) => m.keys().cloned().collect(),
+                other => panic!("budget_stop must be an object, got {other:?}"),
+            };
+        assert_eq!(
+            emitted, canonical,
+            "server JSON drifted from BudgetStop's fields"
+        );
+    }
 
     #[test]
     fn budget_stop_absent_when_none() {

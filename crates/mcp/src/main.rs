@@ -375,7 +375,7 @@ Tool selection: prefer the dedicated `list_lobes`, `describe_lobe`, and `stats` 
     /// `INVALID_PARAMS` (no partial body), gated by a SHOW LOBES
     /// pre-flight check.
     #[tool(
-        description = "Full schema for a single lobe: anchors, ghosts (those whose source_lobe matches), profile (pinned fields, learned scan patterns, active ghost count), and the searchable vector field. Returns a structured object with `anchors`, `ghosts`, `profile` (each independently fallible — on failure replaced by `{\"error\": \"...\"}`) and top-level `vector`: `null` if the lobe has no searchable field, else `{\"field\": ..., \"dim\": ...}`. A `null` `dim` means the dimension is not fixed yet (declared but no embedding written) — you may choose it on the first write; a set `dim` means every `NEAREST` query vector must match it (the engine never embeds; you supply the vector). If the lobe does not exist, the tool returns INVALID_PARAMS with no partial body. Prefer this over `query` with `SHOW ANCHORS` / `SHOW GHOSTS` / `SHOW PROFILE` separately — it composes the three SHOW calls and parses the result. Use after `list_lobes` to plan queries."
+        description = "Full schema for a single lobe: anchors, ghosts (those whose source_lobe matches), profile (pinned fields, learned scan patterns, active ghost count), and the searchable vector field. Returns a structured object with `anchors`, `ghosts`, `profile` (each independently fallible — on failure replaced by `{\"error\": \"...\"}`) and top-level `vector` and `satellite`: `vector` is `null` if the lobe has no searchable field, else `{\"field\": ..., \"dim\": ...}`; `satellite` is `null` unless the lobe declares a sub-gravity axis, in which case it names that field. The satellite axis changes WHICH QUERY IS CHEAP: an equality on it (`field = X`) reads one sub-range of the gravity bucket, while a range (`field < X`) sweeps the whole parent — so prefer equality on the satellite field when you can. A `null` `dim` means the dimension is not fixed yet (declared but no embedding written) — you may choose it on the first write; a set `dim` means every `NEAREST` query vector must match it (the engine never embeds; you supply the vector). If the lobe does not exist, the tool returns INVALID_PARAMS with no partial body. Prefer this over `query` with `SHOW ANCHORS` / `SHOW GHOSTS` / `SHOW PROFILE` separately — it composes the three SHOW calls and parses the result. Use after `list_lobes` to plan queries."
     )]
     async fn describe_lobe(
         &self,
@@ -734,12 +734,19 @@ impl XyzdbServer {
             describe::PartialResult::Ok(p) => p.vector.clone(),
             describe::PartialResult::Err { .. } => None,
         };
+        // Same hoist as `vector`: the axis is contract for the caller, so it must
+        // be readable at the top level rather than buried in `profile`.
+        let satellite = match &profile {
+            describe::PartialResult::Ok(p) => p.satellite.clone(),
+            describe::PartialResult::Err { .. } => None,
+        };
         let response = describe::LobeDescription {
             name: lobe.to_string(),
             anchors,
             ghosts,
             profile,
             vector,
+            satellite,
         };
         serde_json::to_string_pretty(&response).map_err(|e| {
             McpError::internal_error(format!("describe_lobe serialize failed: {e}"), None)

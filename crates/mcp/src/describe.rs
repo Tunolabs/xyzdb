@@ -51,6 +51,13 @@ pub struct LobeDescription {
     /// embedding fixes it. Hoisted from the parsed profile so an agent reads
     /// vector capability at the top level, not buried in `profile`.
     pub vector: Option<VectorField>,
+    /// Sub-gravity axis: `null` if the lobe declares none, else the field name.
+    ///
+    /// CONTRACT, not decoration. Knowing the axis exists changes which query to
+    /// emit: an equality on it is bounded (`field = X` reads one sub-range of the
+    /// gravity bucket) while a range is not (`field < X` sweeps the parent). A
+    /// caller that cannot see it cannot choose the cheap shape.
+    pub satellite: Option<String>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -99,6 +106,10 @@ pub struct ProfileInfo {
     /// `vector` of [`LobeDescription`]; not serialised inside `profile`.
     #[serde(skip)]
     pub vector: Option<VectorField>,
+    /// Sub-gravity axis parsed from the SHOW PROFILE `Satellite:` line. Same
+    /// treatment as `vector`: parse target here, hoisted to the top level.
+    #[serde(skip)]
+    pub satellite: Option<String>,
 }
 
 // ─── Parsers ────────────────────────────────────────────────────────────────
@@ -190,6 +201,7 @@ pub fn parse_show_profile(lines: &[String]) -> ProfileInfo {
     // Absent when talking to an older server that predates the Vector line —
     // treated as "no vector reported", never a parse error.
     let mut vector: Option<VectorField> = None;
+    let mut satellite: Option<String> = None;
 
     #[derive(PartialEq)]
     enum Section {
@@ -234,6 +246,14 @@ pub fn parse_show_profile(lines: &[String]) -> ProfileInfo {
             continue;
         }
 
+        if let Some(rest) = trimmed.strip_prefix("Satellite: ") {
+            section = Section::None;
+            if rest != "(none)" {
+                satellite = Some(rest.to_string());
+            }
+            continue;
+        }
+
         if let Some(rest) = trimmed.strip_prefix("Vector: ") {
             section = Section::None;
             if rest != "(none)" {
@@ -268,6 +288,7 @@ pub fn parse_show_profile(lines: &[String]) -> ProfileInfo {
         learned_patterns,
         active_ghosts_count,
         vector,
+        satellite,
     }
 }
 
@@ -306,6 +327,7 @@ mod tests {
             learned_patterns: vec![],
             active_ghosts_count: 0,
             vector: None,
+            satellite: None,
         });
         let v: serde_json::Value = serde_json::to_value(&r).unwrap();
         assert!(v.get("pinned_fields").is_some());
@@ -385,6 +407,51 @@ mod tests {
         assert_eq!(p.pinned_fields, vec!["monto", "rfc", "status"]);
         assert!(p.learned_patterns.is_empty());
         assert_eq!(p.active_ghosts_count, 0);
+    }
+
+    /// The satellite axis must survive the parse, because for a caller it is
+    /// CONTRACT: an equality on the axis is bounded, a range is not, so an agent
+    /// that cannot see the axis cannot pick the cheap query shape.
+    #[test]
+    fn parse_profile_satellite_declared() {
+        let lines = vec![
+            "Profile for 'events':".to_string(),
+            "  Pinned: (none)".to_string(),
+            "  Vector: (none)".to_string(),
+            "  Satellite: kind".to_string(),
+            "  Ghosts: (none)".to_string(),
+        ];
+        let p = parse_show_profile(&lines);
+        assert_eq!(p.satellite.as_deref(), Some("kind"));
+    }
+
+    /// "(none)" must parse to `None`, not to the literal string — otherwise an
+    /// agent would read a lobe with no axis as having one called "(none)".
+    #[test]
+    fn parse_profile_satellite_absent() {
+        let lines = vec![
+            "Profile for 'plain':".to_string(),
+            "  Pinned: (none)".to_string(),
+            "  Vector: (none)".to_string(),
+            "  Satellite: (none)".to_string(),
+            "  Ghosts: (none)".to_string(),
+        ];
+        assert_eq!(parse_show_profile(&lines).satellite, None);
+    }
+
+    /// A profile from an engine that predates the line must still parse, with the
+    /// axis simply absent — the line is additive, not required.
+    #[test]
+    fn parse_profile_without_the_satellite_line() {
+        let lines = vec![
+            "Profile for 'old':".to_string(),
+            "  Pinned: (none)".to_string(),
+            "  Vector: embedding dim 768".to_string(),
+            "  Ghosts: (none)".to_string(),
+        ];
+        let p = parse_show_profile(&lines);
+        assert_eq!(p.satellite, None);
+        assert!(p.vector.is_some(), "the older lines must still parse");
     }
 
     #[test]

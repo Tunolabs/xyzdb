@@ -326,6 +326,18 @@ impl Engine {
             None => lines.push("  Vector: (none)".into()),
         }
 
+        // Sub-gravity axis (if declared). Additive line, same three-state shape as
+        // Vector above. This is CONTRACT for a caller, not decoration: knowing the
+        // axis exists changes which query to emit, because an equality on it is
+        // bounded (`kind = X` reads one sub-range) while a range on it is not
+        // (`kind < X` sweeps the parent). A caller that cannot see the axis cannot
+        // choose the cheap shape, so hiding it hides a capability rather than a
+        // detail.
+        match self.get_satellite_spec(lobe) {
+            Some(spec) => lines.push(format!("  Satellite: {}", spec.field)),
+            None => lines.push("  Satellite: (none)".into()),
+        }
+
         // Learned fields from telemetry
         let telemetry = self.scan_telemetry.read();
         let stats = telemetry.format_stats();
