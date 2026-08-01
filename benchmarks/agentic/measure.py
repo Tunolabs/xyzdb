@@ -12,6 +12,7 @@ footprint → RAM-at-rest (post graceful restart), disk-at-rest (du on the mount
 """
 import argparse
 import json
+import os
 import subprocess
 import urllib.error
 import urllib.request
@@ -311,7 +312,11 @@ def main() -> None:
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=2505)
     ap.add_argument("--container", required=True)
-    ap.add_argument("--corpus", required=True)
+    ap.add_argument("--corpus", required=True,
+                    help="a .npz, or the axis store directory (then use --axis_point)")
+    ap.add_argument("--axis_point", type=int, default=500,
+                    help="locality granularity when --corpus is a store: "
+                         "500=user 50=group 5=big_group 1=pool")
     ap.add_argument("--mode", choices=["query", "footprint", "both"], default="query")
     ap.add_argument("--image", default="unknown")     # before | after (label)
     ap.add_argument("--envelope", default="?")
@@ -324,7 +329,13 @@ def main() -> None:
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
-    c = np.load(args.corpus)
+    # --corpus takes either a self-contained .npz or the shared axis store (a
+    # directory), in which case --axis_point names the locality granularity.
+    if os.path.isdir(args.corpus):
+        import bucket_axis
+        c = bucket_axis.load_point(args.corpus, args.axis_point)
+    else:
+        c = np.load(args.corpus)
     if args.mode == "both":
         recs = run_both(args, c)
     elif args.mode == "query":

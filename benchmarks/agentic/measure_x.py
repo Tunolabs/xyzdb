@@ -269,11 +269,20 @@ def main():
     ap.add_argument("--max_queries", type=int, default=0)
     ap.add_argument("--repeats", type=int, default=1)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--axis_point", type=int, default=500,
+                    help="locality granularity when --corpus is the axis store: "
+                         "500=user 50=group 5=big_group 1=pool")
     args = ap.parse_args()
     if not args.port:
         args.port = PORTS[args.engine]
 
-    c = np.load(args.corpus)
+    # --corpus takes either a self-contained .npz or the shared axis store (a
+    # directory), in which case --axis_point names the locality granularity.
+    if os.path.isdir(args.corpus):
+        import bucket_axis
+        c = bucket_axis.load_point(args.corpus, args.axis_point)
+    else:
+        c = np.load(args.corpus)
     dim = int(c["meta"][2])
     Adapter = ADAPTERS[args.engine]
     adapter = Adapter(host=args.host, port=args.port, dim=dim, hnsw=hnsw_from_env(args.engine))

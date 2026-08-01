@@ -32,11 +32,35 @@ import numpy as np
 TIE_TOL = 1e-5
 
 
-def exact_scores(q: np.ndarray, vecs: np.ndarray) -> np.ndarray:
-    """Oracle cosine: f32 element-wise products, f64 reduction. Unit-norm ⇒ dot==cosine."""
+def exact_scores(q: np.ndarray, vecs: np.ndarray, chunk: int = 20_000) -> np.ndarray:
+    """Oracle cosine: f32 element-wise products, f64 reduction. Unit-norm ⇒ dot==cosine.
+
+    Scored in row chunks. The products are materialised before the reduction, so a
+    single call over the pooled corpus (246,738 x 1024) would allocate ~1 GB of f32
+    temporary and another ~2 GB in f64 — per query. Chunking rows caps that at about
+    80 MB regardless of corpus size.
+
+    **Exactly equivalent, not an approximation.** The reduction runs along the 1024
+    dimensions of each row independently, so splitting the ROWS never changes any
+    row's sum: chunk boundaries fall between rows, never inside a dot product.
+
+    Args:
+        q: Query vector.
+        vecs: (n, dim) corpus block.
+        chunk: Rows scored per pass.
+
+    Returns:
+        (n,) f64 scores, one per row.
+    """
     q32 = q.astype(np.float32)
-    v32 = vecs.astype(np.float32)
-    return (v32 * q32).astype(np.float64).sum(axis=1)
+    n = len(vecs)
+    if n <= chunk:
+        return (vecs.astype(np.float32) * q32).astype(np.float64).sum(axis=1)
+    out = np.empty(n, dtype=np.float64)
+    for i in range(0, n, chunk):
+        blk = vecs[i:i + chunk].astype(np.float32)
+        out[i:i + chunk] = (blk * q32).astype(np.float64).sum(axis=1)
+    return out
 
 
 def _f32_reduced_scores(q: np.ndarray, vecs: np.ndarray) -> np.ndarray:

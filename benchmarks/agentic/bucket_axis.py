@@ -176,6 +176,117 @@ def verify_oracle_is_per_point(vecs, qvecs, qids, k: int = 10) -> dict:
                        else "BROKEN — oracle did not change; the axis is not an axis"}
 
 
+def build_store(outdir: str, k: int = 10, limit: int = 0) -> dict:
+    """Write the axis as ONE shared vector set plus per-point assignments and truths.
+
+    **The layout is the invariant, not a size optimisation.** The whole axis rests on
+    "same vectors, same queries, only the co-location varies". Four self-contained
+    archives would duplicate the vectors four times and turn that claim into a hope
+    that nobody edits one of the copies. Here the vectors exist once, with a hash, and
+    a point is an integer assignment array plus its oracle — so the claim is
+    structural and cannot be broken by editing. It also drops ~4 GB to ~1.3 GB, and
+    `load_point` memory-maps the vectors, so runtime does not copy them either.
+
+    **The `pool` oracle is Q2's oracle.** With a single bucket the true top-k is over
+    all 246,738 rows, which is exactly the truth for global similarity with no scope.
+    Q2 needs no oracle of its own.
+
+    Args:
+        outdir: Destination directory for the store.
+        k: Oracle depth.
+        limit: Optional turn subsample (the N axis); 0 keeps the full corpus.
+
+    Returns:
+        The manifest that was written.
+    """
+    os.makedirs(outdir, exist_ok=True)
+    meta = json.load(open(os.path.join(CORP, "meta.json")))
+    cvec = np.load(os.path.join(CORP, "cvec.npy"), mmap_mode="r")
+    qvec = np.load(os.path.join(CORP, "qvec.npy"))
+    turns = meta["turns"]
+    qids = list(turns["qid"])
+    vec_idx = np.asarray(turns["vec_idx"], dtype=np.int64)
+
+    if limit and limit < len(qids):
+        rng = np.random.default_rng(meta["seed"])
+        sel = np.sort(rng.choice(len(qids), size=limit, replace=False))
+        vec_idx = vec_idx[sel]
+        qids = [qids[i] for i in sel]
+
+    # The vectors: written ONCE.
+    vecs_path = os.path.join(outdir, "vecs.npy")
+    vecs = np.ascontiguousarray(cvec[vec_idx])
+    np.save(vecs_path, vecs)
+    np.save(os.path.join(outdir, "qvecs.npy"), qvec)
+
+    qid_arr = np.asarray(qids)
+    first_turn = {q: int(np.flatnonzero(qid_arr == q)[0]) for q in sorted(set(qids))}
+    order = [qq["qid"] for qq in meta["queries"]]
+    keep = [i for i, q in enumerate(order) if q in first_turn]
+    qvecs = qvec[keep]
+
+    points = {}
+    for nb in AXIS_POINTS:
+        bucket_ids = regroup(qids, nb)
+        q_bucket = np.array([bucket_ids[first_turn[order[i]]] for i in keep], dtype=np.int64)
+        oracle = build_oracle(vecs, bucket_ids, qvecs, q_bucket, k)
+        np.save(os.path.join(outdir, f"assign_b{nb}.npy"), bucket_ids)
+        np.save(os.path.join(outdir, f"qbucket_b{nb}.npy"), q_bucket)
+        np.save(os.path.join(outdir, f"oracle_b{nb}.npy"), oracle)
+        sizes = np.bincount(bucket_ids)
+        points[str(nb)] = {"point": POINT_NAMES.get(nb, f"b{nb}"),
+                           "means": POINT_MEANING.get(nb, ""),
+                           "tenants_per_bucket": round(500 / nb, 1),
+                           "bucket_min": int(sizes.min()),
+                           "bucket_mean": round(float(sizes.mean()), 1),
+                           "bucket_max": int(sizes.max())}
+
+    manifest = {
+        "corpus": "LongMemEval-S (cleaned)", "embedder": meta["embedder"],
+        "dim": int(meta["dim"]), "seed": int(meta["seed"]),
+        "turns": int(len(vecs)), "queries": int(len(qvecs)), "k": k,
+        "vecs_sha256": _sha_file(vecs_path),
+        "axis": "locality granularity — tenant isolation vs shared pool",
+        "points": points,
+        "oracle_portable": (
+            "Generated on arm64 and valid on x86 without regeneration. The recall "
+            "tolerance is 1e-5 and the measured f32-vs-f64 accumulation gap on this "
+            "corpus is 1.037e-07; a BLAS difference between architectures in f64 is "
+            "~1e-15 relative. Seven orders of magnitude of headroom, so the frozen "
+            "corpus travels with its hash and nothing is rebuilt on the target box."),
+    }
+    with open(os.path.join(outdir, "manifest.json"), "w") as f:
+        json.dump(manifest, f, indent=1)
+    return manifest
+
+
+def load_point(store: str, n_buckets: int) -> dict:
+    """Return one axis point in the shape the measure_*.py scripts expect.
+
+    Keys match the old self-contained archives (`vecs`, `bucket_ids`, `qvecs`,
+    `q_bucket`, `oracle`, `meta`), so nothing downstream changes. `vecs` is
+    memory-mapped: the four points share one file on disk and one mapping in RAM.
+    """
+    man = json.load(open(os.path.join(store, "manifest.json")))
+    return {
+        "vecs": np.load(os.path.join(store, "vecs.npy"), mmap_mode="r"),
+        "qvecs": np.load(os.path.join(store, "qvecs.npy")),
+        "bucket_ids": np.load(os.path.join(store, f"assign_b{n_buckets}.npy")),
+        "q_bucket": np.load(os.path.join(store, f"qbucket_b{n_buckets}.npy")),
+        "oracle": np.load(os.path.join(store, f"oracle_b{n_buckets}.npy")),
+        "meta": np.array([man["turns"], man["dim"], n_buckets, man["k"]]),
+    }
+
+
+def _sha_file(path: str, buf: int = 1 << 22) -> str:
+    """sha256 of a file, so the frozen corpus can be verified where it is consumed."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while (b := f.read(buf)):
+            h.update(b)
+    return h.hexdigest()
+
+
 def assemble(n_buckets: int, k: int, limit: int, out_path: str) -> dict:
     """Build one axis point and write the .npz the measure_*.py scripts consume.
 
@@ -229,7 +340,13 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=0, help="subsample turns (N axis)")
     ap.add_argument("--outdir", default=os.path.join(CORP, "axis"))
     ap.add_argument("--verify", action="store_true", help="run the per-point negative control only")
+    ap.add_argument("--store", metavar="DIR",
+                    help="build the shared store (vectors once + per-point assignment/oracle)")
     args = ap.parse_args()
+
+    if args.store:
+        print(json.dumps(build_store(args.store, args.k, args.limit), indent=1))
+        return
 
     if args.verify:
         meta = json.load(open(os.path.join(CORP, "meta.json")))
