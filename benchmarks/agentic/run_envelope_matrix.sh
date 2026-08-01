@@ -24,6 +24,12 @@
 #       docker build --build-arg XYZ_IMAGE_VARIANT=x86-v3 -t xyzdb:0.9.6-fixA-x86v3 .
 #       XYZDB_IMG=xyzdb:0.9.6-fixA-x86v3 XYZ_ARCH=x86-v3 bash run_envelope_matrix.sh
 #   XYZ_ARCH just labels the arch in each record; XYZDB_IMG selects the actual image.
+# Rival images: single pinned source (see images.env). require_pinned_images is
+# the negative control — this runner dies if it is not sourced or if a moving
+# tag creeps back in, instead of silently resolving `:latest`.
+. "$(cd "$(dirname "$0")" && pwd)/images.env"
+require_pinned_images || exit 1
+
 set -uo pipefail
 AG="$(cd "$(dirname "$0")" && pwd)"; cd "$AG"; PY="${PY:-$AG/.venv/bin/python}"
 export PYTHONPATH="${PYTHONPATH:-$(cd "$AG/../.." && pwd)/examples/client/python}:$AG"
@@ -52,9 +58,9 @@ up(){ # $1=engine $2=tier ; sets container bench-<engine> with tier envelope + p
     xyzdb)    docker run -d --name "$c" $mf -p 2505:2505 -v "bench_$e:/data" \
                 "$IMG_XYZ" --port 2505 --path /data/bench --bind 0.0.0.0 --cache-size "$xyzc" >/dev/null 2>&1;;
     pgvector) docker run -d --name "$c" $mf -p 5432:5432 -e POSTGRES_PASSWORD=bench -v "bench_$e:/var/lib/postgresql" \
-                pgvector/pgvector:pg18 -c shared_buffers=$pgsb -c maintenance_work_mem=$pgmwm >/dev/null 2>&1;;
-    qdrant)   docker run -d --name "$c" $mf -p 6333:6333 -v "bench_$e:/qdrant/storage" qdrant/qdrant:latest >/dev/null 2>&1;;
-    chroma)   docker run -d --name "$c" $mf -p 8000:8000 -v "bench_$e:/data" chromadb/chroma:latest >/dev/null 2>&1;;
+                "$IMG_PG" -c shared_buffers=$pgsb -c maintenance_work_mem=$pgmwm >/dev/null 2>&1;;
+    qdrant)   docker run -d --name "$c" $mf -p 6333:6333 -v "bench_$e:/qdrant/storage" "$IMG_QDRANT" >/dev/null 2>&1;;
+    chroma)   docker run -d --name "$c" $mf -p 8000:8000 -v "bench_$e:/data" "$IMG_CHROMA" >/dev/null 2>&1;;
   esac
   local i=0; while [ $i -lt 120 ]; do
     case "$e" in

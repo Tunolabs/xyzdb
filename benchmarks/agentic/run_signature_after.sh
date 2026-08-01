@@ -5,6 +5,12 @@
 # Dense pass (rivals at step-1 tuned config; xyzDB exact, no dial). Resumable via
 # per-cell .done. Synthetic corpus. **Mac/OrbStack = DIRECTION only** (page-cache
 # mediated) — the publishable table is m6a native x86. OOM/no-start = recorded result.
+# Rival images: single pinned source (see images.env). require_pinned_images is
+# the negative control — this runner dies if it is not sourced or if a moving
+# tag creeps back in, instead of silently resolving `:latest`.
+. "$(cd "$(dirname "$0")" && pwd)/images.env"
+require_pinned_images || exit 1
+
 set -uo pipefail
 AG="$(cd "$(dirname "$0")" && pwd)"; cd "$AG"
 PY="$AG/.venv/bin/python"
@@ -72,11 +78,11 @@ up(){   # $1=engine $2=mem $3=cpus $4=cache  -> 0 ready / 1 not
     xyzdb)    docker run -d --name "$c" --cpus "$cpus" --memory "$mem" -p 2505:2505 -v "$mnt" \
                 "$XYZDB_IMG" --port 2505 --path /data/bench --bind 0.0.0.0 --cache-size "$cache" >/dev/null 2>&1 ;;
     pgvector) docker run -d --name "$c" --cpus "$cpus" --memory "$mem" -p 5432:5432 -e POSTGRES_PASSWORD=bench \
-                -v "$mnt" pgvector/pgvector:pg18 >/dev/null 2>&1 ;;
+                -v "$mnt" "$IMG_PG" >/dev/null 2>&1 ;;
     qdrant)   docker run -d --name "$c" --cpus "$cpus" --memory "$mem" -p 6333:6333 -v "$mnt" \
-                qdrant/qdrant:latest >/dev/null 2>&1 ;;
+                "$IMG_QDRANT" >/dev/null 2>&1 ;;
     chroma)   docker run -d --name "$c" --cpus "$cpus" --memory "$mem" -p 8000:8000 -v "$mnt" \
-                chromadb/chroma:latest >/dev/null 2>&1 ;;
+                "$IMG_CHROMA" >/dev/null 2>&1 ;;
   esac
   local i=0
   while [ $i -lt 90 ]; do

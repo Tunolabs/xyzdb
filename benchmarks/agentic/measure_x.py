@@ -77,12 +77,38 @@ def _git_short():
         return "?"
 
 
+# v2: the stamp carries all FOUR engines, not just ours. v1 recorded `xyzdb_image`
+# precisely and the rivals not at all — 825 of the 1106 published result files name
+# the xyzDB build, none names a rival's. That asymmetry is indefensible in a
+# comparative number: it means the published matrix cannot be reproduced (the
+# rivals ran at whatever `:latest` resolved to that day, unrecorded), and any
+# before/after between matrices moves two variables at once.
+#
+# `images_pinned` is the honest marker, not decoration: a run whose rival refs are
+# not digest-pinned says so IN THE DATA, so a result file can never look pinned
+# when it was not. The shell-side guard (`require_pinned_images` in images.env)
+# should stop that run before it starts; this is the belt to its braces, for the
+# case where a measure_*.py is invoked directly rather than through a runner.
+_RIVALS = ("PG", "QDRANT", "CHROMA")
+_RIVAL_IMAGES = {r.lower(): os.environ.get(f"IMG_{r}", "") for r in _RIVALS}
+_RIVAL_VERSIONS = {r.lower(): os.environ.get(f"VER_{r}", "") for r in _RIVALS}
+
 _STAMP = {"bench_commit": _git_short(),
-          "xyzdb_image": os.environ.get("XYZDB_IMG", "")}
+          "xyzdb_image": os.environ.get("XYZDB_IMG", ""),
+          "rival_images": _RIVAL_IMAGES,
+          "rival_versions": _RIVAL_VERSIONS,
+          "images_pinned": all("@sha256:" in v for v in _RIVAL_IMAGES.values()),
+          "images_pinned_on": os.environ.get("IMAGES_PINNED_ON", "")}
 
 
 def bench_stamp():
-    """Provenance stamp for a measured record: {bench_commit, xyzdb_image}."""
+    """Provenance stamp for a measured record — all four engines.
+
+    Keys: ``bench_commit``, ``xyzdb_image``, ``rival_images`` (digest-pinned refs),
+    ``rival_versions`` (human-readable, read from the live engines), and
+    ``images_pinned`` — False whenever any rival ref is not a digest, which is what
+    keeps an unpinned run from being mistaken for a reproducible one.
+    """
     return dict(_STAMP)
 
 

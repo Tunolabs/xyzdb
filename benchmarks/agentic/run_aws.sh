@@ -16,6 +16,12 @@
 # Phases: A = rival coverage (pg/qdrant/chroma, 189K flat, ladder, serves/OOM build-vs-query).
 #         B = xyzDB before/after (pool/5000 + mono-189k × ladder, canary + latency/RAM/disk/CPU).
 # G3 (readahead) finally observable here: real block device, not OrbStack virtiofs.
+# Rival images: single pinned source (see images.env). require_pinned_images is
+# the negative control — this runner dies if it is not sourced or if a moving
+# tag creeps back in, instead of silently resolving `:latest`.
+. "$(cd "$(dirname "$0")" && pwd)/images.env"
+require_pinned_images || exit 1
+
 set -uo pipefail
 AG="$(cd "$(dirname "$0")" && pwd)"; cd "$AG"; PY="$AG/.venv/bin/python"
 STORAGE="${STORAGE:-ssd}"; STORAGE_ROOT="${STORAGE_ROOT:-/mnt/$STORAGE}"
@@ -54,10 +60,10 @@ up_rival(){ # $1=engine $2=env
   local e=$1 env=$2 mem c=bench-$1; mem=$(env_mem "$env"); docker rm -f "$c" >/dev/null 2>&1; clean_disk "$e"
   case "$e" in
     pgvector) docker run -d --name "$c" --cpus 2 --memory "$mem" --shm-size "$mem" -p 5432:5432 -e POSTGRES_PASSWORD=bench \
-                $(mount_arg pgvector) pgvector/pgvector:pg18 \
+                $(mount_arg pgvector) "$IMG_PG" \
                 -c shared_buffers=$(pg_sb "$env") -c maintenance_work_mem=$(pg_mwm "$env") >/dev/null 2>&1;;
-    qdrant)   docker run -d --name "$c" --cpus 2 --memory "$mem" -p 6333:6333 $(mount_arg qdrant) qdrant/qdrant:latest >/dev/null 2>&1;;
-    chroma)   docker run -d --name "$c" --cpus 2 --memory "$mem" -p 8000:8000 $(mount_arg chroma) chromadb/chroma:latest >/dev/null 2>&1;;
+    qdrant)   docker run -d --name "$c" --cpus 2 --memory "$mem" -p 6333:6333 $(mount_arg qdrant) "$IMG_QDRANT" >/dev/null 2>&1;;
+    chroma)   docker run -d --name "$c" --cpus 2 --memory "$mem" -p 8000:8000 $(mount_arg chroma) "$IMG_CHROMA" >/dev/null 2>&1;;
   esac
   local i=0; while [ $i -lt 90 ]; do
     case "$e" in

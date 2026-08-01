@@ -18,6 +18,12 @@
 # Run:  cd ~/xyzdb/benchmarks/agentic && ./run_envelope_aws.sh
 # Overrides: XYZDB_IMG, REBUILD_IMG, TIERS, SCALES, DEPLOYMENTS_RUN, SCENARIOS,
 #            BUILD_TIMEOUT, WD_STALL, OUT.
+# Rival images: single pinned source (see images.env). require_pinned_images is
+# the negative control — this runner dies if it is not sourced or if a moving
+# tag creeps back in, instead of silently resolving `:latest`.
+. "$(cd "$(dirname "$0")" && pwd)/images.env"
+require_pinned_images || exit 1
+
 set -uo pipefail
 AG="$(cd "$(dirname "$0")" && pwd)"; cd "$AG"
 REPO="$(cd "$AG/../.." && pwd)"
@@ -85,7 +91,7 @@ if [ "${REBUILD_IMG:-0}" = 1 ] || ! docker image inspect "$XYZDB_IMG" >/dev/null
 fi
 
 # --- rival images: pull if absent ---
-for img in pgvector/pgvector:pg18 qdrant/qdrant:latest chromadb/chroma:latest; do
+for img in "$IMG_PG" "$IMG_QDRANT" "$IMG_CHROMA"; do
   docker image inspect "$img" >/dev/null 2>&1 || { say "pulling $img"; docker pull "$img" || fail "docker pull $img failed"; }
 done
 

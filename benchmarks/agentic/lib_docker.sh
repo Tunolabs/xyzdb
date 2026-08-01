@@ -33,9 +33,12 @@ TIER_DEV="2c8g 8g 8g 2 2048"
 # Override via XYZDB_IMG.
 IMG_XYZDB="${XYZDB_IMG:-xyzdb:0.9.6-fixA}"
 export XYZDB_IMG="$IMG_XYZDB"   # so measure_*.py bench_stamp() records the exact image
-IMG_PG="${PG_IMG:-pgvector/pgvector:pg18}"
-IMG_QDRANT="${QDRANT_IMG:-qdrant/qdrant:latest}"
-IMG_CHROMA="${CHROMA_IMG:-chromadb/chroma:latest}"
+# Rival images come from images.env, digest-pinned, with NO fallback default on
+# purpose: the old `${PG_IMG:-pgvector/pgvector:pg18}` form meant a caller who set
+# nothing silently got a moving tag. require_pinned_images turns that silence into
+# a failure.
+. "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/images.env"
+require_pinned_images || exit 1
 
 port_for(){ case "$1" in xyzdb) echo 2505;; pgvector) echo 5432;; qdrant) echo 6333;; chroma) echo 8000;; esac; }
 datadir_for(){ case "$1" in xyzdb|chroma) echo /data;; pgvector) echo /var/lib/postgresql;; qdrant) echo /qdrant/storage;; esac; }

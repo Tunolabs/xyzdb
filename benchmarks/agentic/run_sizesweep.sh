@@ -4,6 +4,12 @@
 # xyzDB=exacto=1.000 (canary/control) · rivales muestran el residuo HNSW (crece con tamaño+profundidad).
 # scoped best-form todos · f32 lossless · dense frozen HNSW (mismo config que el 0.9429 de hoy, INV-2).
 # @2c/8G holgado → todos sirven → aísla tamaño, no envelope. Engine-exclusive (1 contenedor a la vez).
+# Rival images: single pinned source (see images.env). require_pinned_images is
+# the negative control — this runner dies if it is not sourced or if a moving
+# tag creeps back in, instead of silently resolving `:latest`.
+. "$(cd "$(dirname "$0")" && pwd)/images.env"
+require_pinned_images || exit 1
+
 set -uo pipefail
 AG="$(cd "$(dirname "$0")" && pwd)"; cd "$AG"; PY="$AG/.venv/bin/python"
 OUT=/tmp/lme_sizesweep.jsonl; : > "$OUT"
@@ -17,9 +23,9 @@ up(){ # $1=engine $2=image(xyzdb only)
   docker rm -f "$c" >/dev/null 2>&1; docker volume rm "bench_$1" >/dev/null 2>&1
   case "$e" in
     xyzdb)    docker run -d --name "$c" --cpus 2 --memory 8g -p 2505:2505 -v "bench_$1:/data" "$img" --port 2505 --path /data/bench --bind 0.0.0.0 --cache-size 512 >/dev/null 2>&1;;
-    pgvector) docker run -d --name "$c" --cpus 2 --memory 8g -p 5432:5432 -e POSTGRES_PASSWORD=bench -v "bench_$1:/var/lib/postgresql" pgvector/pgvector:pg18 >/dev/null 2>&1;;
-    qdrant)   docker run -d --name "$c" --cpus 2 --memory 8g -p 6333:6333 -v "bench_$1:/qdrant/storage" qdrant/qdrant:latest >/dev/null 2>&1;;
-    chroma)   docker run -d --name "$c" --cpus 2 --memory 8g -p 8000:8000 -v "bench_$1:/data" chromadb/chroma:latest >/dev/null 2>&1;;
+    pgvector) docker run -d --name "$c" --cpus 2 --memory 8g -p 5432:5432 -e POSTGRES_PASSWORD=bench -v "bench_$1:/var/lib/postgresql" "$IMG_PG" >/dev/null 2>&1;;
+    qdrant)   docker run -d --name "$c" --cpus 2 --memory 8g -p 6333:6333 -v "bench_$1:/qdrant/storage" "$IMG_QDRANT" >/dev/null 2>&1;;
+    chroma)   docker run -d --name "$c" --cpus 2 --memory 8g -p 8000:8000 -v "bench_$1:/data" "$IMG_CHROMA" >/dev/null 2>&1;;
   esac
   local i=0; while [ $i -lt 120 ]; do
     case "$e" in
