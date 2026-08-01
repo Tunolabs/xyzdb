@@ -49,17 +49,55 @@ def _xyz_nearest(db, lobe: str, bucket_val: str, qvec, k: int) -> list:
     return out.get("records", []) or []
 
 
+# ── The structured fields that travel with every record — DECLARED ONCE ──────
+#
+# These used to be named literally ("topic", "status", "importance") in four
+# separate places: the chroma metadata builder, the xyzDB record builder, the pg
+# column list and row builder, and the qdrant payload builder. Adding a field meant
+# finding all four, and two fields the v2 design needs had been added to the corpus
+# without reaching any engine.
+#
+# `tenant` is the one that blocks whole questions. It is the original question-id —
+# the user. At the `user` granularity nobody notices it is missing, because the
+# bucket IS the tenant; from `group` outward the bucket is the pool and the tenant
+# vanishes from the engine entirely. Without it, "what did THIS user tell me" cannot
+# be expressed on the coarse half of the axis, the pooled Q3 has no residual to
+# filter on, and the result worth selling — pooling tenants costs nothing if you
+# declare the tenant as the satellite axis — has no field to declare.
+#
+# (name, python caster, pg column type). Order fixes the pg column order.
+EXTRA_FIELDS = [
+    ("tenant", str, "text"),              # the user — structural, see above
+    ("topic", int, "int"),                # S5b range sweep
+    ("status", str, "text"),              # Q4 aggregate filter
+    ("importance", float, "double precision"),   # Q4 aggregate value
+    ("cat2", int, "int"),                 # Q3 equality sweep: selectivity 1/2
+    ("cat10", int, "int"),                #                    1/10
+    ("cat100", int, "int"),               #                    1/100
+    ("cat1000", int, "int"),              #                    1/1000
+]
+
+
+def present_fields(meta):
+    """The declared fields actually supplied by this run, in declaration order.
+
+    A scenario passes only what it needs, so the adapters carry the intersection
+    rather than demanding every field exist.
+    """
+    if meta is None:
+        return []
+    return [(n, c, t) for (n, c, t) in EXTRA_FIELDS if n in meta]
+
+
 def _chroma_md(i, bids, sids, meta, with_bucket):
-    """Per-turn chroma metadata dict (bucket/sid/topic/status/importance as present)."""
+    """Per-turn chroma metadata dict (bucket/sid + every declared field present)."""
     d = {}
     if with_bucket:
         d["bucket"] = int(bids[i])
     if sids is not None:
         d["sid"] = str(sids[i])
-    if meta is not None:
-        d["topic"] = int(meta["topic"][i])
-        d["status"] = str(meta["status"][i])
-        d["importance"] = float(meta["importance"][i])
+    for name, cast, _ in present_fields(meta):
+        d[name] = cast(meta[name][i])
     return d
 
 
@@ -85,10 +123,8 @@ class XyzdbAdapter:
                 r = {"*bucket": str(bids[i]), "id": f"g{i}", "emb": vecs[i].tolist()}
                 if sids is not None:  # S1: session id co-located in the same gravity bucket
                     r["sid"] = str(sids[i])
-                if meta is not None:  # S5/S6: structured fields in the SAME record
-                    r["topic"] = int(meta["topic"][i])
-                    r["status"] = str(meta["status"][i])
-                    r["importance"] = float(meta["importance"][i])
+                for name, cast, _ in present_fields(meta):  # structured fields, SAME record
+                    r[name] = cast(meta[name][i])
                 recs.append(r)
             self.db.put_batch(self.lobe, recs)
         # Operational cost of scoping (the moat): xyzDB scopes by DECLARING gravity.
@@ -171,8 +207,8 @@ class PgvectorAdapter:
         extra = ""
         if self._has_sid:
             extra += ", sid text"
-        if self._has_meta:
-            extra += ", topic int, status text, importance float8"
+        for name, _, sqltype in present_fields(meta):
+            extra += f", {name} {sqltype}"
         if self.scoped:
             # one partition per bucket → WHERE bucket=X prunes to a small per-bucket HNSW.
             cur.execute(f"CREATE TABLE items (gid int, bucket int{extra}, emb vector({self.dim})) PARTITION BY LIST (bucket)")
@@ -189,8 +225,7 @@ class PgvectorAdapter:
         cols_l = ["gid", "bucket"]
         if self._has_sid:
             cols_l.append("sid")
-        if self._has_meta:
-            cols_l += ["topic", "status", "importance"]
+        cols_l += [n for n, _, _ in present_fields(meta)]
         cols_l.append("emb")
         cols = ",".join(cols_l)
         tmpl = "(" + ",".join(["%s"] * len(cols_l)) + ")"
@@ -199,8 +234,7 @@ class PgvectorAdapter:
             row = [int(i), int(bids[i])]
             if self._has_sid:
                 row.append(str(sids[i]))
-            if self._has_meta:
-                row += [int(meta["topic"][i]), str(meta["status"][i]), float(meta["importance"][i])]
+            row += [cast(meta[name][i]) for name, cast, _ in present_fields(meta)]
             row.append(vecs[i])
             rows.append(tuple(row))
         for s in range(0, len(rows), BATCH):
@@ -335,10 +369,8 @@ class QdrantAdapter:
                     pl["sid"] = str(sids[i])
                     if self.s1_variant == "payload-dup":
                         pl["sess"] = by_bs[(str(int(bids[i])), str(sids[i]))]
-                if self._has_meta:
-                    pl["topic"] = int(meta["topic"][i])
-                    pl["status"] = str(meta["status"][i])
-                    pl["importance"] = float(meta["importance"][i])
+                for name, cast, _ in present_fields(meta):
+                    pl[name] = cast(meta[name][i])
                 pts.append(models.PointStruct(id=int(i), vector=vecs[i].tolist(), payload=pl))
             self.client.upsert(collection_name=self.coll, points=pts, wait=True)
         self._ef = hnsw.get("ef", 128)

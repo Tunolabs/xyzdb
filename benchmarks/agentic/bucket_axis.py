@@ -71,6 +71,7 @@ import os
 
 import numpy as np
 
+import metadata_gen
 import recall_harness as rh
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -169,6 +170,11 @@ def verify_oracle_is_per_point(vecs, qvecs, qids, k: int = 10) -> dict:
     q_coarse = np.array([b_coarse[first_turn[q]] for q in uniq])
     o_fine = build_oracle(vecs, b_fine, qvecs, q_fine, k)
     o_coarse = build_oracle(vecs, b_coarse, qvecs, q_coarse, k)
+    # Note on reading the result: at the real corpus a HANDFUL of queries keep their
+    # top-k even at `pool` — 1 of 500 survives 245k added distractors. That is not an
+    # error, it is the corpus's difficulty floor: a needle distinctive enough that no
+    # amount of haystack displaces it. It is also part of why recall does not collapse
+    # at the coarse end, and worth saying when the axis is reported.
     same = int(sum(set(o_fine[j]) == set(o_coarse[j]) for j in range(len(qvecs))))
     return {"queries": len(qvecs), "identical_top_k": same,
             "changed": len(qvecs) - same,
@@ -219,6 +225,25 @@ def build_store(outdir: str, k: int = 10, limit: int = 0) -> dict:
     np.save(vecs_path, vecs)
     np.save(os.path.join(outdir, "qvecs.npy"), qvec)
 
+    # The TENANT — the original question-id, as a field and not only as a bucket.
+    # At the `user` point the bucket IS the tenant so nobody misses it; from `group`
+    # outward the bucket is the pool and the tenant would vanish from the engines,
+    # taking three questions with it (coarse Q1, the pooled Q3's residual, and the
+    # "declare the tenant as the satellite axis" result). It costs no corpus: it is
+    # the question-id that was always there.
+    tenant = np.asarray(qids)
+    np.save(os.path.join(outdir, "tenant.npy"), tenant)
+
+    # The structured metadata, MATERIALISED rather than left to be regenerated.
+    # It used to be rebuilt from (n, seed) at run time, so two runs could claim the
+    # same vecs_sha256 and carry different fields if metadata_gen changed underneath.
+    # Freezing it and hashing it makes the whole corpus one sealed artifact.
+    md = metadata_gen.gen(len(vecs))
+    meta_dir = os.path.join(outdir, "meta")
+    os.makedirs(meta_dir, exist_ok=True)
+    for name, arr in md.items():
+        np.save(os.path.join(meta_dir, f"{name}.npy"), np.asarray(arr))
+
     qid_arr = np.asarray(qids)
     first_turn = {q: int(np.flatnonzero(qid_arr == q)[0]) for q in sorted(set(qids))}
     order = [qq["qid"] for qq in meta["queries"]]
@@ -246,6 +271,11 @@ def build_store(outdir: str, k: int = 10, limit: int = 0) -> dict:
         "dim": int(meta["dim"]), "seed": int(meta["seed"]),
         "turns": int(len(vecs)), "queries": int(len(qvecs)), "k": k,
         "vecs_sha256": _sha_file(vecs_path),
+        "tenant_sha256": _sha_file(os.path.join(outdir, "tenant.npy")),
+        # Every metadata array is hashed too. Hashing only the vectors would let two
+        # runs claim the same corpus while carrying different structured fields.
+        "meta_sha256": {name: _sha_file(os.path.join(meta_dir, f"{name}.npy"))
+                        for name in sorted(md)},
         "axis": "locality granularity — tenant isolation vs shared pool",
         "points": points,
         "oracle_portable": (
@@ -268,6 +298,10 @@ def load_point(store: str, n_buckets: int) -> dict:
     memory-mapped: the four points share one file on disk and one mapping in RAM.
     """
     man = json.load(open(os.path.join(store, "manifest.json")))
+    meta_dir = os.path.join(store, "meta")
+    fields = {"tenant": np.load(os.path.join(store, "tenant.npy"), allow_pickle=False)}
+    for name in man.get("meta_sha256", {}):
+        fields[name] = np.load(os.path.join(meta_dir, f"{name}.npy"), allow_pickle=False)
     return {
         "vecs": np.load(os.path.join(store, "vecs.npy"), mmap_mode="r"),
         "qvecs": np.load(os.path.join(store, "qvecs.npy")),
@@ -275,6 +309,10 @@ def load_point(store: str, n_buckets: int) -> dict:
         "q_bucket": np.load(os.path.join(store, f"qbucket_b{n_buckets}.npy")),
         "oracle": np.load(os.path.join(store, f"oracle_b{n_buckets}.npy")),
         "meta": np.array([man["turns"], man["dim"], n_buckets, man["k"]]),
+        # The structured fields the adapters carry, tenant included. `meta` above is
+        # the four-number header the measure scripts already read; this is the dict
+        # of per-turn columns.
+        "fields": fields,
     }
 
 
