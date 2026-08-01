@@ -8,8 +8,8 @@ See the LICENSE file for the full terms.
 The license text is copyright (c) 2017 MariaDB Corporation Ab.
 
 The Business Source License applies separately to each version of xyzDB, and
-each version carries its own Change Date. xyzDB 1.0 converts to the Apache
-License, Version 2.0 on 2029-08-01. See docs/license-change-dates.md for the
+each version carries its own Change Date. xyzDB 1.1 converts to the Apache
+License, Version 2.0 on 2029-09-01. See docs/license-change-dates.md for the
 full schedule.
 
 Everything in this repository is covered by the Business Source License,

@@ -21,9 +21,10 @@ they open they will target `dev`. See [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 
 ## `release/<minor>.x` — not yet
 
-A `release/1.0.x` branch opens **only** when 1.1 development starts on `dev` and the
-1.0 line still needs patches in parallel. Until that day `dev` *is* the 1.0.x line, and
-a separate branch is ceremony with no function.
+A `release/<minor>.x` branch opens **only** when the next minor's development starts
+on `dev` while the previous line still needs patches in parallel. Until that day
+`dev` *is* the current minor line — the 1.1.x line today — and a separate branch is
+ceremony with no function.
 
 ## Tags — `vMAJOR.MINOR.PATCH`
 

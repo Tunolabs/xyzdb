@@ -170,7 +170,7 @@ backend xyzdb
 
 ## 4. Backup
 
-> **Snapshots are physical.** They do not survive an on-disk format change between minor versions (a pre-1.0 data directory is already refused at open — see [`docs/releases/v1.0.0.md`](docs/releases/v1.0.0.md) → Compatibility). **Verify that you can restore before you need to**, and until the logical export (`dump` / `load`) lands ([`ROADMAP.md`](ROADMAP.md)), keep the ability to re-ingest from source.
+> **Snapshots are physical.** They do not survive an on-disk format change between minor versions (a pre-1.0 data directory is already refused at open — see [`docs/releases/v1.0.0.md`](docs/releases/v1.0.0.md) → Compatibility). A minor bump does not *imply* such a change — 1.0 → 1.1 has none — so check that release's Compatibility section rather than assuming either way. **Verify that you can restore before you need to**, and until the logical export (`dump` / `load`) lands ([`ROADMAP.md`](ROADMAP.md)), keep the ability to re-ingest from source.
 
 ### Hot snapshot
 

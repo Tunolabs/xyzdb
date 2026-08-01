@@ -31,7 +31,7 @@ docs/
 │
 └── releases/             ← per-version release notes (the development record)
     ├── README.md         ← index of every version, newest first
-    └── v0.1.0 … v1.0.0  ← one frozen note per release
+    └── v1.0.0, v1.1.0 … ← one frozen note per public release
 ```
 
 Root-level docs (outside `docs/`): [`../README.md`](../README.md) (project overview + release history), [`../CHANGELOG.md`](../CHANGELOG.md) (per-version summary), [`../OPERATIONS.md`](../OPERATIONS.md) (operator runbook), [`../PROTOCOL.md`](../PROTOCOL.md) (wire-protocol specification), [`../ROADMAP.md`](../ROADMAP.md) (intent — next / later / not doing), [`../CONTRIBUTING.md`](../CONTRIBUTING.md).

@@ -8,11 +8,11 @@
     "url": "https://github.com/Tunolabs/xyzdb",
     "source": "github"
   },
-  "version": "1.0.1",
+  "version": "1.1.0",
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/tunolabs/xyzdb-mcp:1.0.1",
+      "identifier": "ghcr.io/tunolabs/xyzdb-mcp:1.1.0",
       "runtimeHint": "docker",
       "transport": {
         "type": "stdio"
@@ -45,7 +45,7 @@
     },
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/tunolabs/xyzdb-mcp:1.0.1",
+      "identifier": "ghcr.io/tunolabs/xyzdb-mcp:1.1.0",
       "runtimeHint": "docker",
       "transport": {
         "type": "stdio"

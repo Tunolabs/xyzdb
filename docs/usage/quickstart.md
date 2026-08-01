@@ -245,7 +245,7 @@ Restart the MCP client, then prompt the agent with *"List the lobes you can see 
   - **Tier 3 — Power user**: PULL (graph traversal), CREATE GHOST (manual materialised views), PIN/UNPIN, AUTOANCHOR APPLY, SHOW (tuning).
   - **Tier 4 — Operator**: COMPACT / ANALYZE / BULKMODE / MIGRATE (deprecated as language; use `xyzdb-cli admin <verb>`).
 - **`architecture.md`** — how the engine works internally. Useful before tuning or extending.
-- **`releases/v1.0.0.md`** — the current release notes.
+- **`releases/v1.1.0.md`** — the current release notes.
 
 ## Troubleshooting quick hits
 

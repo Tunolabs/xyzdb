@@ -6,63 +6,25 @@ All notable changes to xyzDB are documented here. Format based on [Keep a Change
 
 ## [Unreleased]
 
+## [1.1.0] — sub-gravity, and detectors that speak
+
+Narrative, migration notes and declared costs: [`docs/releases/v1.1.0.md`](docs/releases/v1.1.0.md).
+
+Minor, not patch: new grammar, new response fields and new `STATS` / `/metrics` / `describe_lobe` surface — all additive and backward compatible. 1.1 carries its own BUSL Change Date (2029-09-01).
+
 ### Added
-- **Sub-gravity axis (`SATELLITE BY <field> IN "lobe"`).** A third foundational
-  axis, sibling to gravity and vector: names the single field whose value
-  sub-buckets a gravity bucket via the `sat` axis of the spatial key. The write
-  path places each record in satellite `hash16(field)`; a `SCAN … WHERE gravity
-  AND satellite_field` (and the same shape feeding `AGGREGATE count()`) scans
-  only that satellite sub-range instead of the whole bucket. It is a **pure
-  optimisation** — same rows, same order as the parent scan — because the read
-  path re-applies the field predicate as an anti-collision residual (the 16-bit
-  hash collides by design). It also bounds `… | NEAREST(…)`: with an equality on
-  the satellite field the candidate set is the satellite, so NEAREST scores only
-  that sub-range and returns the exact top-k of the filtered set instead of
-  scoring the whole gravity bucket. One axis per lobe; declared on an empty lobe;
-  a `SET` that changes the field re-places the record, but `ON CONFLICT UPDATE`
-  updates in place and does NOT re-place (same as gravity) — so a satellite field
-  that changes via upsert strands the record and its bounded `count` runs short;
-  pick an immutable axis field or mutate with `SET`. Records missing the field
-  share satellite 0, so the axis pays only when the field is near-universal in
-  the lobe. See `docs/xytalk-spec.md` §2.2.2.
-- **`budget_stop` now reports which order produced the partial** (`strategy:
-  "score_order" | "key_order"`). It names the fact, not the implementation, and it
-  earns its place on a deliberately minimal struct for one reason: without it a
-  reading the spec already documents — extrapolating the observed pass rate to the
-  unexamined tail and concluding "almost certainly no more" — is FALSE when
-  candidates were walked in key order, where the unwalked region can hold BETTER
-  rows rather than merely more. `docs/xytalk-spec.md` §2.20 now separates the two
-  readings: *how many remain* holds under both orders, *whether what remains is
-  worse* holds only under `score_order`.
-- `NEAREST` responses truncated by the latency airbag (`--nearest-budget-ms`)
-  now carry a `budget_stop` object (`examined` / `candidates` / `found`) — the
-  counts at the cut, turning the `has_more` inference into a fact. Present ONLY
-  on that truncation frame; every other `PaginatedRecords` (cursor pages, SCAN
-  caps) stays byte-identical, so `has_more`-based clients are unaffected.
+
+- **Sub-gravity axis — `SATELLITE BY <field> IN "lobe"`.** Splits one gravity bucket into sub-buckets so `SCAN`/`AGGREGATE`/`NEAREST` pinning both the gravity and satellite fields read only the matching rows. Opt-in per lobe; a pure optimisation (same rows, same order). Rules and the upsert caveat: `docs/xytalk-spec.md` §2.2.2.
+- **`NEAREST` is bounded by the satellite** when the query pins that field — the exact top-k of the filtered set instead of scoring the whole bucket.
+- **`budget_stop` on a truncated `NEAREST`** (`examined` / `candidates` / `found` / `strategy`): the counts at the latency-airbag cut, plus which traversal produced the partial. Present only on that frame; every other response is byte-identical. `strategy` defines two values but this release emits only `"score_order"` — the field ships ahead of the second traversal so clients key off the fact instead of assuming it. Spec §2.20.
+- **Invariant guards are observable state.** `STATS` gains `invariant_guards` and `recovered_from_wal`; `/metrics` gains the matching series. Correctness signals, not capacity metrics — any non-zero is an engine bug.
+- **The satellite axis is discoverable.** `SHOW PROFILE` reports it and the MCP `describe_lobe` tool gained a `satellite` field, so an agent can see the axis it is meant to query along.
 
 ### Fixed
-- **A `UNIQUE` anchor can no longer be duplicated after an unclean restart.** The
-  duplicate-anchor check is a bloom-gated point read, and a post-recovery SSTable
-  can carry a bloom that disagrees with its data — so the check could report
-  "absent" for an anchor that exists and `PUT` would write a second record under
-  a key declared unique, silently. When a process replayed WAL at open (i.e. the
-  previous run did not shut down cleanly), an anchor miss is now re-confirmed
-  without the bloom before it is trusted, and a hit is logged loudly. Outside that
-  window nothing changes and nothing is paid: the check's common case is a
-  legitimate miss, so confirming unconditionally would cost a full level descent
-  on every anchored insert. This closes the duplicate-record exposure
-  independently of the underlying bloom defect, whose root cause is still open.
-  **Declared cost:** the confirmation stays armed for the whole life of a process
-  that recovered — it cannot be switched off early without knowing the defect is
-  gone — so after an unclean restart a write-heavy anchored lobe pays a level
-  descent per anchor miss until the next restart. The mode is no longer something
-  to infer from slower writes: `recovered_from_wal` is published in `STATS` and as
-  the `xyzdb_recovered_from_wal` gauge on `/metrics`. If the cost ever matters, the
-  path is to bound the window (until the recovery-flushed tables are compacted
-  away), not to drop the confirmation.
-- `PUT ... ON CONFLICT UPDATE` (upsert) now notifies ghosts and updates the
-  record cache, so covering/aggregate ghosts and cached reads reflect an upsert
-  without a `REFRESH` (previously stale until refreshed).
+
+- **A `UNIQUE` anchor can no longer be duplicated after an unclean restart.** A process that replayed WAL re-confirms an anchor miss without the bloom before trusting it. Has a declared cost while armed.
+- **Table ids are monotonic across restarts**, so one identity can never name two different table contents.
+- **`PUT … ON CONFLICT UPDATE` propagates to ghosts and the record cache**, so aggregate ghosts and cached reads reflect an upsert without a `REFRESH`.
 
 ## [1.0.0] — 2026-07-30 (1.0 launch)
 

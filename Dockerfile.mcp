@@ -6,8 +6,8 @@
 # `xyzdb-server` and listens on TCP :2505). `xyzdb-mcp` speaks JSON-RPC 2.0
 # over **stdio**, so this image is meant to be run as:
 #
-#   docker run -i --rm ghcr.io/tunolabs/xyzdb-mcp:1.0.1 --embed /data
-#   docker run -i --rm ghcr.io/tunolabs/xyzdb-mcp:1.0.1 --connect host:2505
+#   docker run -i --rm ghcr.io/tunolabs/xyzdb-mcp:1.1.0 --embed /data
+#   docker run -i --rm ghcr.io/tunolabs/xyzdb-mcp:1.1.0 --connect host:2505
 #
 # The `-i` (interactive, stdin kept open) is REQUIRED: the MCP client drives
 # the process over stdin/stdout. The container must not daemonize and must not

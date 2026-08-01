@@ -90,7 +90,7 @@ Prefer not to build from source? A prebuilt image ships `xyzdb-mcp` and is liste
 
 ```bash
 docker run -i --rm -v /abs/path/to/your/data:/data \
-  ghcr.io/tunolabs/xyzdb-mcp:1.0.1 --embed /data
+  ghcr.io/tunolabs/xyzdb-mcp:1.1.0 --embed /data
 ```
 
 Run with `-i` (stdio transport); see the [Docker section](docs/mcp-integration.md#docker-image) for `--connect` and MCP-client config.
@@ -298,9 +298,13 @@ The full release history — every version, format break, and design decision �
 
 **1.0 is the first public, source-available (BUSL-1.1) release** of the hardened single-tier engine. It publishes the line that stabilised across `0.8.x` — the last pre-1.0 public series: the vector column and gravity-bounded exact `NEAREST` (0.8.8), then `NEAREST` hardening, WAL bounding, and the streaming bucket sweep (0.8.9–0.8.13) — now under a license.
 
-### Beyond 1.0
+### 1.1 — sub-gravity
 
-The full roadmap — what's next on the 1.0.x line, what's planned for later, and what xyzDB is **deliberately not doing** — lives in [`ROADMAP.md`](ROADMAP.md).
+**1.1 adds a third foundational axis.** `SATELLITE BY` splits one gravity bucket into sub-buckets, so a query pinning both the gravity field and the satellite field reads only the matching rows — `SCAN`, `AGGREGATE` and `NEAREST` alike. It also makes a truncated `NEAREST` say what it is (`budget_stop`), turns the engine's invariant guards into `STATS` / `/metrics` state, and closes a duplicate-anchor exposure after an unclean restart. Additive throughout: a 1.0.x data directory opens unchanged. See [`docs/releases/v1.1.0.md`](docs/releases/v1.1.0.md).
+
+### Beyond 1.1
+
+The full roadmap — what's next, what's planned for later, and what xyzDB is **deliberately not doing** — lives in [`ROADMAP.md`](ROADMAP.md).
 
 Cross-engine bench evidence (xyzDB vs PostgreSQL / MongoDB, AWS scale 1): [`docs/benchmark-native.md`](docs/benchmark-native.md).
 

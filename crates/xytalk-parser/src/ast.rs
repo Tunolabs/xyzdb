@@ -28,7 +28,7 @@ pub enum Statement {
     /// the single field whose value sub-buckets a large gravity bucket, so a
     /// bounded query scans one satellite instead of the whole parent. A
     /// foundational axis sibling to gravity/vector; one per lobe; declared on an
-    /// empty lobe. See `docs/xytalk-spec.md` §2.21.
+    /// empty lobe. See `docs/xytalk-spec.md` §2.2.2.
     Satellite(SatelliteStmt),
     Lobe(LobeStmt),
     Show(ShowStmt),

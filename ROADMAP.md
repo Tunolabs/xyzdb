@@ -11,7 +11,7 @@ major) is allowed to change is in
 engine's behavior is declared **per lobe** and is **off by default** — no
 declaration, no change. Upgrading does not alter what you already have running.
 
-## Next — the 1.0.x line
+## Next — the 1.1.x line
 
 - **Code contributions open** — we are **targeting the last week of August
   2026** (about 30 days after the 2026-07-30 launch); a target, not a guarantee,
