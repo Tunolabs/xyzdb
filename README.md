@@ -265,6 +265,9 @@ Deep dive in [`docs/architecture.md`](docs/architecture.md). Language surface in
 
 xyzDB is designed for a specific problem: applications with graph-shaped data where co-location pays off. What it doesn't do:
 
+> Open defects — things it does wrong rather than does not do — are in
+> [`KNOWN-ISSUES.md`](KNOWN-ISSUES.md).
+
 - **Not multi-node — yet.** Single-host only. No replication, no sharding, no HA. On the Beyond-1.0 roadmap, not v0.x.
 - **Bearer-token auth + TLS 1.3, but no authorization model.** The server binds loopback by default; a non-loopback bind requires a bearer token (`--auth-token`) or an explicit `--insecure-allow-no-auth` override. TLS 1.3 is available (since v0.4). There is no per-user authorization, RBAC, or multi-tenancy — deploy behind your own access layer.
 - **Not ACID across entities — yet.** Writes are atomic per keyspace + WAL group commit. Cross-entity transactions are not supported; cross-lobe transactions are a Beyond-1.0 item.
@@ -272,7 +275,6 @@ xyzDB is designed for a specific problem: applications with graph-shaped data wh
 - **No GNG / online auto-organization.** Background work is leveled compaction + auto-ghost lifecycle (Permanent / Ephemeral / Promoted) only. The "Growing Neural Gas" thread positioned in an early design as a third pillar was never implemented; there is no online learning of record placement.
 - **Ad-hoc scans without a matching ghost are slower than indexed databases.** Once auto-ghost has observed a recurring query, latency drops to ghost-class. Until then a `SCAN WHERE field > X` runs 1–25 ms (xyzDB, Scale 0.1) versus PostgreSQL 0.2–0.7 ms with a B-tree index.
 - **No full-text search, no global ANN index.** Vector similarity (`NEAREST`, v0.8) is an **exact** cosine/dot/l2 scan **bounded to a gravity bucket** — there is no HNSW/IVF/ANN index for whole-lobe nearest-neighbour, and no full-text search. The engine never embeds: the caller always supplies the vector.
-- **Ghosts go stale after an `ON CONFLICT UPDATE` upsert.** The upsert path does not notify the ghost layer, so a covering ghost keeps the pre-upsert record and an aggregate ghost keeps stale `count` / `sum` until the ghost is rebuilt. **Mitigation:** run `REFRESH GHOST "<name>"` after a load that upserts.
 - **`NEAREST` cannot be served from a ghost.** Routed explicitly through one (`SCAN GHOST "<name>" … | NEAREST`), it returns the ghost's index entries — null LIDs, only the embedded fields — not resolved records. Use a plain `SCAN … | NEAREST`: a filter that matches a ghost still routes through it for the filter but falls back to primary point-reads for the vector and returns correct records.
 - **`FIND` and `PULL` don't self-limit — yet.** Without an explicit `LIMIT`, `FIND` returns every matching record and `PULL` every linked record — there is no default row cap (unlike `SCAN`, capped at `SCAN_LIMIT_DEFAULT = 1000`) and no time budget (unlike `NEAREST`'s `--nearest-budget-ms`); `PULL` bounds only traversal depth (`MAX_PULL_DEPTH = 10`), not cardinality. Pass a `LIMIT` for interactive queries over large lobes. A default cap and query budget are a roadmap item.
 - **Not battle-tested.** PostgreSQL has 30 years of production. xyzDB has the published benchmarks in [`docs/benchmark-native.md`](docs/benchmark-native.md) and the regression tests above.
