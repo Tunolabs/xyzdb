@@ -246,10 +246,24 @@ pub(crate) fn deserialize_hydrated(
     lobe_name: &str,
     fd: Option<&xyzdb_core::field_dict::FieldDict>,
 ) -> xyzdb_core::error::Result<xyzdb_core::record::Record> {
+    deserialize_hydrated_with(&engine.turba().vectors, spatial_key, blob, lobe_name, fd)
+}
+
+/// [`deserialize_hydrated`] against a `vectors` tree handle instead of the whole
+/// engine — for read paths that hold trees rather than an `&Engine`, such as the
+/// ghost point-read. Same contract; `deserialize_hydrated` delegates here so the
+/// two cannot drift apart.
+pub(crate) fn deserialize_hydrated_with(
+    vectors: &turba_engine::tree::Tree,
+    spatial_key: &[u8],
+    blob: &[u8],
+    lobe_name: &str,
+    fd: Option<&xyzdb_core::field_dict::FieldDict>,
+) -> xyzdb_core::error::Result<xyzdb_core::record::Record> {
     let mut record = xyzdb_core::record::deserialize_record(blob, lobe_name, fd)?;
     if xyzdb_core::record::format_version(blob) == 5
         && let Some(dict) = fd
-        && let Ok(Some(column)) = engine.turba().vectors.get(spatial_key)
+        && let Ok(Some(column)) = vectors.get(spatial_key)
     {
         xyzdb_core::record::hydrate_vector(&mut record, &column, dict);
     }

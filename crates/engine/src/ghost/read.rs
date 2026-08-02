@@ -11,12 +11,17 @@ impl GhostLobeManager {
     /// fallback path does a point-read on it per entry whose
     /// spatial key needs the full record; the projection fast
     /// path never touches it.
+    ///
+    /// `vectors` is the V5 vector-column Tree, keyed by the same spatial key.
+    /// The fallback path hydrates from it so a ghost-routed read returns the
+    /// same fields as the identical query answered from the primary keyspace.
     pub fn read_topn(
         &self,
         name: &str,
         n: usize,
         extra_filters: &[Filter],
         spatial: &Tree,
+        vectors: &Tree,
         field_dict: Option<&xyzdb_core::field_dict::FieldDict>,
     ) -> Result<Vec<Record>> {
         let shard = self
@@ -150,7 +155,14 @@ impl GhostLobeManager {
                     Ok(Some(v)) => v,
                     _ => continue,
                 };
-                match xyzdb_core::record::deserialize_record(
+                // Hydrate the V5 vector column, exactly as the primary read
+                // paths do. This path returns the FULL record, so a missing
+                // declared vector is not a projection — it is the same query
+                // answering differently depending on whether a ghost happens to
+                // exist, which is the one thing a ghost must never do.
+                match crate::ops::deserialize_hydrated_with(
+                    vectors,
+                    spatial_key_bytes,
                     &record_bytes,
                     &source_lobe,
                     field_dict,

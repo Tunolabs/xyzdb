@@ -119,3 +119,67 @@ fn shape_is_projection_not_filter() {
         }
     }
 }
+
+/// SHAPE composed AFTER NEAREST must project the ranked rows, not erase them.
+///
+/// Found from the agentic benchmark while trying to project the 1024-float
+/// embedding out of the response. `SCAN | NEAREST` (two steps) takes the fused
+/// fast path; adding `| SHAPE` makes it three steps, so it falls to the generic
+/// loop — a different code path.
+///
+/// The lobe declares `VECTOR emb` and the width is >= `VECTOR_F32_MIN_DIMS`, so
+/// the embedding is stored HOISTED out of the record body. A first version of
+/// this test used a 2-d undeclared list and passed while the bench failed: with
+/// no declaration the record stays V1 and `emb` is an ordinary field, so the
+/// generic loop never had to find a hoisted column. The declaration is the
+/// variable under test, not decoration.
+#[test]
+fn shape_after_nearest_projects_and_keeps_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let e = Engine::open(dir.path()).unwrap();
+    exec(&e, r#"LOBE "v""#);
+    exec(&e, r#"GRAVITY BY bucket IN "v""#);
+    exec(&e, r#"SATELLITE BY cat2 IN "v""#);
+    exec(&e, r#"VECTOR emb IN "v""#);
+    // 64 dims = VECTOR_F32_MIN_DIMS, the width above which a float list is
+    // packed and hoisted. Each record leans on a different leading axis so the
+    // ranking is unambiguous.
+    for (i, k) in ["a", "b", "c"].iter().enumerate() {
+        let mut dims = vec!["0.0".to_string(); 64];
+        dims[i] = "1.0".to_string();
+        exec(
+            &e,
+            &format!(
+                r#"PUT {{_type:"R", k:"{k}", bucket:"0", cat2:1, emb:[{}]}} IN "v""#,
+                dims.join(", ")
+            ),
+        );
+    }
+    let mut q = vec!["0.0".to_string(); 64];
+    q[0] = "1.0".to_string();
+    let q = q.join(", ");
+
+    let plain = records(exec(
+        &e,
+        &format!(r#"SCAN "v" WHERE bucket = "0" AND cat2 = 1 | NEAREST 2 BY emb TO [{q}] USING cosine"#),
+    ));
+    assert_eq!(plain.len(), 2, "control: NEAREST alone returns its top-2");
+
+    let shaped = records(exec(
+        &e,
+        &format!(r#"SCAN "v" WHERE bucket = "0" AND cat2 = 1 | NEAREST 2 BY emb TO [{q}] USING cosine | SHAPE {{k}}"#),
+    ));
+    assert_eq!(
+        shaped.len(),
+        plain.len(),
+        "SHAPE is a projection: it must not drop the ranked rows"
+    );
+    let want: BTreeSet<String> = ["k"].iter().map(|s| s.to_string()).collect();
+    for (i, r) in shaped.iter().enumerate() {
+        assert_eq!(field_keys(r), want, "row {i} must shape down to just k");
+        assert_eq!(
+            r.lid, plain[i].lid,
+            "row {i}: SHAPE must preserve which rows and their order"
+        );
+    }
+}

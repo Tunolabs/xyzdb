@@ -213,6 +213,7 @@ fn execute_scan_inner(engine: &Engine, stmt: ScanStmt, cap: ScanCap) -> Result<S
                 limit,
                 &flat_filters,
                 &engine.turba.spatial,
+                &engine.turba.vectors,
                 fd,
             ) {
                 Ok(r) => r,
@@ -272,6 +273,7 @@ fn execute_scan_inner(engine: &Engine, stmt: ScanStmt, cap: ScanCap) -> Result<S
                 probe,
                 &flat_filters,
                 &engine.turba.spatial,
+                &engine.turba.vectors,
                 fd,
             ) {
                 Ok(mut r) => match scan_limit {

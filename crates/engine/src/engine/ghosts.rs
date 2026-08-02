@@ -657,7 +657,14 @@ impl Engine {
         let records = match &stmt.filter_expr {
             None => {
                 self.ghost_manager
-                    .read_topn(&stmt.name, limit, &[], &self.turba.spatial, fd)?
+                    .read_topn(
+                        &stmt.name,
+                        limit,
+                        &[],
+                        &self.turba.spatial,
+                        &self.turba.vectors,
+                        fd,
+                    )?
             }
             Some(expr) => match expr.as_flat_and() {
                 Some(flat) => {
@@ -667,13 +674,21 @@ impl Engine {
                         limit,
                         &flat,
                         &self.turba.spatial,
+                        &self.turba.vectors,
                         fd,
                     )?
                 }
                 None => {
                     let core = crate::ops::to_core_expr(expr);
                     self.ghost_manager
-                        .read_topn(&stmt.name, usize::MAX, &[], &self.turba.spatial, fd)?
+                        .read_topn(
+                        &stmt.name,
+                        usize::MAX,
+                        &[],
+                        &self.turba.spatial,
+                        &self.turba.vectors,
+                        fd,
+                    )?
                         .into_iter()
                         .filter(|r| crate::ops::matches_core_expr(r, &core))
                         .take(limit)
