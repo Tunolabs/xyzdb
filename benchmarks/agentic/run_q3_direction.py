@@ -9,11 +9,14 @@ varying the field's cardinality (cat2 / cat10 / cat100 / cat1000).
 
 WHAT IT IS NOT
 --------------
-Publishable latency. This machine is arm64 and the publishable image builds with
-`target-cpu=x86-64-v3` only on x86, so xyzDB here is literally a different binary.
-Docker also runs on a VM with 16 KB pages against 4 KB on the x86 box, which shifts
-RSS. **Absolute milliseconds do not transfer. The SHAPE of the curve mostly does**,
-and the shape is the claim: does cost fall as the filter tightens, or rise?
+Publishable latency. The image here is the arm64 variant — a first-class build, not
+a crippled one: the `target-cpu=x86-64-v3` flag is target-scoped to the x86 Linux
+triple precisely so it never reaches aarch64, and on ARM there is nothing for it to
+widen (the scorer's `f32x8` maps to AVX2 on x86 and to NEON here). What does not
+carry across is the COMPARISON: absolute milliseconds from one ISA cannot be quoted
+against the other, and Docker on this Mac runs in a VM with 16 KB pages against the
+x86 box's 4 KB, which shifts RSS. **The SHAPE of the curve mostly does carry**, and
+the shape is the claim: does cost fall as the filter tightens, or rise?
 
 Every row is stamped `direction_only: true` so a number from here can never be
 mistaken for a matrix cell.
@@ -29,6 +32,7 @@ ran, and a comparison that ignores that column is comparing two different things
 """
 import argparse
 import json
+import os
 import statistics
 import subprocess
 import sys
@@ -143,11 +147,18 @@ def run_pg(container, field, value, k, qvecs, truths, vecs, repeats, dim):
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--store", default="corpora/lme/axis")
-    ap.add_argument("--n", type=int, default=50_000, help="rows of the slice")
+    # 0 = the whole point, matching `load_q3_point.py`'s own default. They MUST
+    # agree: the oracle is computed here over the first `n` rows while the engine
+    # holds whatever the loader put in, so two different defaults would score a
+    # 246,738-row engine against a 50,000-row truth and report the gap as recall.
+    ap.add_argument("--n", type=int, default=0, help="rows of the slice; 0 = all")
     ap.add_argument("--queries", type=int, default=20)
     ap.add_argument("--repeats", type=int, default=3)
     ap.add_argument("--k", type=int, default=10)
-    ap.add_argument("--xyz-port", type=int, default=25000)
+    # The container port. A host-native binary on some other port is not the
+    # artefact under test — `run_q3_direction.sh` brings the engine up through
+    # lib_docker.sh so every engine in the sweep is a pinned container.
+    ap.add_argument("--xyz-port", type=int, default=2505)
     ap.add_argument("--engines", default="xyzdb,qdrant,pgvector")
     ap.add_argument("--out", default="")
     ap.add_argument("--exclusive", action="store_true",
@@ -155,16 +166,17 @@ def main() -> None:
     args = ap.parse_args()
 
     c = load_point(args.store, 1)          # pool: one bucket, the whole corpus
-    vecs = np.asarray(c["vecs"][:args.n])
-    fields = {k2: v[:args.n] for k2, v in c["fields"].items()}
+    n = args.n or len(c["vecs"])
+    vecs = np.asarray(c["vecs"][:n])
+    fields = {k2: v[:n] for k2, v in c["fields"].items()}
     qvecs = c["qvecs"][:args.queries]
     engines = args.engines.split(",")
     rows = []
 
     for card in mg.CARDINALITIES:
         field = f"cat{card}"
-        rows_per_sat = args.n / card
-        if mg.is_degenerate(args.n, card, args.k):
+        rows_per_sat = n / card
+        if mg.is_degenerate(n, card, args.k):
             rows.append({"axis": field, "skipped": "degenerate",
                          "rows_per_satellite": round(rows_per_sat, 1)})
             continue
@@ -187,9 +199,10 @@ def main() -> None:
                     "engine": eng, "mechanism": mech,
                     "p50_ms": round(statistics.median(lat), 2),
                     "recall": round(float(np.mean(rec)), 4),
-                    "n": args.n, "queries": len(qvecs),
+                    "n": n, "queries": len(qvecs),
                     "direction_only": True, "engine_exclusive": args.exclusive,
-                    "why": "arm64 + 16KB pages; the publishable image is x86-64-v3",
+                    "why": "arm64 image + 16KB pages; the publishable one is x86-64-v3",
+                    "xyzdb_image": os.environ.get("XYZDB_IMG", "unset"),
                 })
             except Exception as e:
                 rows.append({"axis": field, "engine": eng, "error": str(e)[:200]})

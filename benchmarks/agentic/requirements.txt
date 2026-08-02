@@ -5,14 +5,21 @@
 # pinned Docker images named in docs/benchmark-agentic.md, so these client versions affect
 # orchestration, not the rivals' measured behaviour.
 #
+# But a client still has to SPEAK to the server it is pinned against. Step 0 pinned the
+# server images by digest and left these pins untouched, so the qdrant client sat two minor
+# versions behind its own server and said so on every connection. Client minors now track
+# their server's: qdrant server 1.18.3 -> client 1.18.x (the client publishes no 1.18.3;
+# the minor is what has to match). Python must be >= 3.10 for that client to install at
+# all — a 3.9 interpreter silently resolves to 1.16.1 and reopens the skew.
+#
 # The xyzDB client is NOT listed here: the minimal reference client ships in the repo at
 # examples/client/python (the runner puts it on PYTHONPATH) and is stdlib-only.
 #
 # Building the corpus from scratch (build_lme.py) needs the heavier deps in
 # requirements-corpus.txt — skip those if you rsync a prebuilt corpora/lme/.
 
-numpy==2.0.2
+numpy==2.0.2                  # requires Python >= 3.10 for the qdrant pin below
 psycopg2-binary==2.9.12       # pgvector adapter
 pgvector==0.4.2               # pgvector vector-type registration
-qdrant-client==1.16.1         # qdrant adapter
+qdrant-client==1.18.0         # qdrant adapter — minor matches the pinned server (1.18.3)
 chromadb>=1.0.0               # chroma adapter (uses the 1.0 CreateCollectionConfiguration API)

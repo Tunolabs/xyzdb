@@ -40,6 +40,90 @@ export XYZDB_IMG="$IMG_XYZDB"   # so measure_*.py bench_stamp() records the exac
 . "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/images.env"
 require_pinned_images || exit 1
 
+# ─── Tripwires ───────────────────────────────────────────────────────────────
+# Three rules that were WRITTEN DOWN and got broken anyway, on 2026-08-01, by
+# someone who had all three in front of them. A rule you have to remember is a
+# rule you will skip the day the task changes shape under you. These make them
+# impossible to skip instead, in the pattern `require_pinned_images` already set:
+# the runner that does not satisfy one DIES, it does not warn.
+#
+# Each carries the negative control that proves it can fail, because a tripwire
+# nobody has ever seen fire is indistinguishable from a comment.
+
+# T3 — a modified engine does not measure.
+#
+# THE ONE THAT WOULD HAVE STOPPED IT. The session that broke the other two began
+# as benchmark work, found an engine bug, fixed it, and kept measuring — with an
+# engine tree that no longer matched any built artefact. Numbers from that tree
+# name a binary nobody can rebuild.
+#
+# Diagnosing an engine bug from a bench is legitimate and expected; what is not
+# is carrying the modified tree into a measurement. So the check is at the
+# runner's front door, not in the client.
+#
+# Negative control: `touch crates/engine/src/lib.rs` (or edit anything under
+# crates/) and run any runner — it must die here.
+require_clean_engine_tree(){
+    command -v git >/dev/null 2>&1 || return 0        # not a checkout: nothing to assert
+    local root dirty
+    root=$(git rev-parse --show-toplevel 2>/dev/null) || return 0
+    dirty=$(git -C "$root" status --porcelain -- crates/ 2>/dev/null)
+    if [ -n "$dirty" ]; then
+        echo "FATAL: the engine tree is modified — a benchmark cannot measure it." >&2
+        echo "$dirty" | sed 's/^/       /' >&2
+        echo "       If the work changed the engine, this is no longer a bench session:" >&2
+        echo "       commit or stash it, rebuild the image, and measure that image." >&2
+        echo "       (Diagnosing with a local build is fine — measuring with one is not.)" >&2
+        return 1
+    fi
+}
+
+# T1 — what is measured must be a container.
+#
+# The engine under measurement has to be the artefact that ships, held to the
+# same `--cpus`/`--memory` bound as its rivals. A host process is neither. This
+# asserts the port is published by a RUNNING container whose name is the one
+# `up_engine` creates — not merely that something answers, which a native binary
+# on the same port satisfies just as well.
+#
+# Negative control: start `target/release/xyzdb-server --port 2505` on the host
+# with no container up, then call this — it must fail.
+require_containerised_engine(){   # $1=engine
+    local e=$1 c=bench-$1 port; port=$(port_for "$e")
+    local state; state=$(docker inspect -f '{{.State.Running}}' "$c" 2>/dev/null)
+    if [ "$state" != "true" ]; then
+        echo "FATAL: no running container '$c' — refusing to measure." >&2
+        echo "       Something may be answering on port $port, but a host process is" >&2
+        echo "       not the artefact under test and carries none of the cell's limits." >&2
+        return 1
+    fi
+    docker port "$c" "$port" >/dev/null 2>&1 || {
+        echo "FATAL: container '$c' does not publish port $port." >&2
+        return 1
+    }
+}
+
+# T2 — full capture, and the exit code of the thing that mattered.
+#
+# Twice a pipe hid a failure (`cmd | head` reporting head's status); once `tail`
+# ate the evidence of which test failed; and once a trailing `grep -c` found zero
+# failures, exited 1 for "no match", and turned a GREEN tree into a reported red.
+# All four are the same root: the status of a compound is the status of its LAST
+# command, and a filter is a lossy witness.
+#
+# So: everything goes to a file (never `tail`, never `head`), `REAL_EXIT` is
+# captured on its very next line, and nothing runs between the command and that
+# capture. Grep the FILE afterwards, as much as you like — the code is already
+# safe in `REAL_EXIT`.
+#
+# Negative control: `run_step /tmp/x.log false` must return 1.
+run_step(){   # $1=logfile, rest=command -> the command's own exit code
+    local log=$1; shift
+    "$@" > "$log" 2>&1
+    local REAL_EXIT=$?
+    return $REAL_EXIT
+}
+
 port_for(){ case "$1" in xyzdb) echo 2505;; pgvector) echo 5432;; qdrant) echo 6333;; chroma) echo 8000;; esac; }
 datadir_for(){ case "$1" in xyzdb|chroma) echo /data;; pgvector) echo /var/lib/postgresql;; qdrant) echo /qdrant/storage;; esac; }
 # Where measure_*.py should `du` the on-disk footprint: bind path (AWS) or named volume (Mac).
