@@ -141,6 +141,34 @@ PREDICTION_SAME_SET_DIFFERENT_PARENT = {
 }
 
 
+# ─── Two things that are arithmetic, not findings ────────────────────────────
+#
+# Written before the run so neither can be reported later as a surprise.
+#
+# 1. `pool×cat2` is disk-bound BY ARITHMETIC. ~123,369 vectors × 1024 f32 = ~505 MB
+#    of vector column touched per query, against whatever cache the tier grants
+#    (64 MB at the tight one). With `--nearest-budget-ms 0` nothing cuts it short,
+#    so the cell is exact and slow on purpose. **The finding would be if it were
+#    NOT disk-bound**; the slowness itself is the multiplication, and reading it as
+#    a result would be reading the corpus size back out of the clock.
+#
+# 2. **qdrant should win that cell, probably by a lot.** 123k points with a filter
+#    is precisely the regime HNSW exists for, and its payload index now lets the
+#    filter apply inside the traversal. This is the one cell where xyzDB has
+#    everything to lose — which is exactly why the grid was moved here. It gets
+#    published without decoration.
+#
+# The wall-timeout in `run_envelope_matrix.sh` now attributes its cause instead of
+# assuming thrash, because a cell that is slow by arithmetic must not be recorded
+# as an engine failure. If `pool×cat2` runs long, the number IS part of the answer:
+# measure it, do not kill it.
+DECLARED_ARITHMETIC = {
+    "pool×2": {"vectors_scanned": 123_369, "bytes_touched_mb": 505,
+               "expect": "disk-bound; slowness is the multiplication, not a result"},
+    "flagship_risk": "qdrant traverses its graph here and should win; published as is",
+}
+
+
 def summary() -> list:
     return [c.describe() for c in MEASURED + CONTEXT]
 

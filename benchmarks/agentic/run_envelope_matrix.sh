@@ -101,9 +101,30 @@ cell(){ # $1=engine $2=tier $3=scenario(s1|s3) $4=N
       --engine "$e" --container "bench-$e" --envelope "$envlbl" --steps 10,100,1000 \
       --out "$out" >"$out.stdout" 2>&1 || rc=$?
   fi
-  if [ "$rc" -ge 142 ]; then   # SIGALRM: exceeded WALL = sustained thrash, never completed
-    "$PY" -c "import json;open('$out','a').write(json.dumps({'kind':'${sc}-verdict','engine':'$e','tier':'$t','envelope':'$envlbl','base_n':$N,'verdict':'OOM-thrash','wall_s':$WALL,'note':'exceeded wall-timeout: sustained swap thrash, did not complete'})+chr(10))"
-    docker kill "bench-$e" >/dev/null 2>&1; echo "  -> OOM-thrash (>${WALL}s wall)"
+  if [ "$rc" -ge 142 ]; then
+    # SIGALRM: the cell exceeded WALL. The CAUSE is read, not assumed.
+    #
+    # This used to record `OOM-thrash` and "sustained swap thrash" unconditionally,
+    # because that was the failure it was written for (a tight tier plus swap grinds
+    # instead of dying). But the adjusted grid has cells that are slow by ARITHMETIC:
+    # pool x cat2 scores ~123k vectors exactly, ~500 MB of vector column per query,
+    # with the airbag off. If one of those exceeds the wall, calling it thrash names
+    # the wrong cause and reads as an engine failure.
+    #
+    # So the verdict distinguishes what the container reports (OOM-killed, or a
+    # memory limit low enough for the working set to thrash) from a cell that simply
+    # did not finish in time. Both are recorded — never a gap — but they are not the
+    # same finding.
+    local killed; killed=$(oomkilled "$e")
+    local verdict note
+    if [ "$killed" = "true" ]; then
+      verdict="OOM-thrash"; note="exceeded wall-timeout and the container was OOM-killed"
+    else
+      verdict="wall-timeout"
+      note="exceeded the ${WALL}s wall without completing; container not OOM-killed, so the cause is NOT established as memory — an exact scan of a large bounded set can legitimately exceed this wall"
+    fi
+    "$PY" -c "import json;open('$out','a').write(json.dumps({'kind':'${sc}-verdict','engine':'$e','tier':'$t','envelope':'$envlbl','base_n':$N,'verdict':'$verdict','wall_s':$WALL,'oomkilled':$killed,'note':'$note'})+chr(10))"
+    docker kill "bench-$e" >/dev/null 2>&1; echo "  -> $verdict (>${WALL}s wall)"
   fi
   local ko=$(oomkilled "$e"); echo "  oomkilled(post)=$ko"
   "$PY" -c "import json;open('$out','a').write(json.dumps({'kind':'$sc-oomcheck','engine':'$e','tier':'$t','oomkilled_post':$ko})+chr(10))"
