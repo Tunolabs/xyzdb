@@ -111,21 +111,44 @@ def prove_route(db, lobe_sat, lobe_plain, axis, axis_value, bucket, qvec, k) -> 
     qs = json.dumps([float(x) for x in qvec])
     stmt = (f'WHERE bucket = "{bucket}" AND {axis} = {axis_value} '
             f'| NEAREST {k} BY emb TO {qs} USING cosine')
-    bounded = db.execute(f'SCAN "{lobe_sat}" {stmt}')
-    parent = db.execute(f'SCAN "{lobe_plain}" {stmt}')
-    b_stop, p_stop = bounded.get("budget_stop"), parent.get("budget_stop")
-    if b_stop is None and p_stop is not None:
-        verdict = "PASS — bounded completed, parent hit the airbag: different routes"
-    elif b_stop is None and p_stop is None:
-        verdict = ("INCONCLUSIVE — neither truncated; the budget is too generous to "
-                   "discriminate, so this run proves nothing about the route")
-    elif b_stop is not None and p_stop is not None:
-        verdict = ("INCONCLUSIVE — both truncated; the budget is too tight, the "
-                   "bounded path did not get to finish either")
+
+    def ask(lobe):
+        """Three possible outcomes, because the airbag has TWO paths.
+
+        Expiring during HYDRATION degrades to a prefix-correct partial carrying
+        `budget_stop`. Expiring during the SCORING SCAN is a hard error by design —
+        which is what a full 246,738-candidate sweep hits first. The first version of
+        this gate only knew about the partial and died on the error, so it could not
+        read the very signal it was built to read.
+        """
+        try:
+            r = db.execute(f'SCAN "{lobe}" {stmt}')
+            return ("partial", r.get("budget_stop")) if r.get("budget_stop") else ("complete", None)
+        except Exception as e:
+            msg = str(e)
+            return ("airbag_error", msg[:120]) if "budget" in msg else ("error", msg[:120])
+
+    b_kind, b_info = ask(lobe_sat)
+    p_kind, p_info = ask(lobe_plain)
+    cut_short = {"partial", "airbag_error"}
+
+    if b_kind == "complete" and p_kind in cut_short:
+        verdict = (f"PASS — bounded completed while the parent {p_kind}: the two "
+                   "queries did NOT take the same route")
+    elif b_kind == "complete" and p_kind == "complete":
+        verdict = ("INCONCLUSIVE — neither was cut short; the budget is too generous "
+                   "to discriminate, so this run proves nothing about the route")
+    elif b_kind in cut_short and p_kind in cut_short:
+        verdict = ("INCONCLUSIVE — both were cut short; the budget is too tight and "
+                   "the bounded path never got to finish either")
+    elif b_kind in cut_short:
+        verdict = "FAIL — the BOUNDED query was cut short while the parent completed"
     else:
-        verdict = "FAIL — the BOUNDED query truncated while the parent did not"
-    return {"gate": "bounded_route_taken", "bounded_budget_stop": b_stop,
-            "parent_budget_stop": p_stop, "verdict": verdict}
+        verdict = f"ERROR — unexpected outcome: bounded={b_kind} parent={p_kind}"
+    return {"gate": "bounded_route_taken",
+            "bounded": {"outcome": b_kind, "detail": b_info},
+            "parent": {"outcome": p_kind, "detail": p_info},
+            "verdict": verdict}
 
 
 def main() -> None:
