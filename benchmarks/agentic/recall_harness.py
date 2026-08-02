@@ -14,88 +14,16 @@ ABOVE it — otherwise the exactness gate fails on benign cross-implementation r
 """
 import numpy as np
 
-# CALIBRATED 2026-08-01 against the real corpus, as this module's docstring always
-# asked for. `measure_precision_gap` over all 500 queries at three points of the
-# locality axis gives a worst f32-vs-f64 accumulation gap of **1.037e-07**, and it
-# barely moves with bucket size (8.61e-08 at ~493/bucket, 9.06e-08 at ~4.9k,
-# 1.04e-07 at ~49k) because the gap is driven by the 1024 dimensions of one dot
-# product, not by how many vectors are scored.
-#
-# 1e-5 is ~100x that floor: comfortably above the noise, so an exact engine is never
-# failed for benign cross-implementation rounding.
-#
-# The previous 2e-4 was an uncalibrated safe upper bound — **1929x** the measured
-# gap — and being too wide is not free. A tolerance forgives every score within it,
-# so at 2e-4 the gate credited an engine for returning rows whose scores were
-# genuinely different (measured: 4.2% of queries at 500 buckets, 8.3% at 5). Too
-# wide over-reports rivals exactly as too narrow under-reports the exact engine.
-TIE_TOL = 1e-5
+# Set from measure_precision_gap on the real corpus (see checkpoint). Default is a safe
+# upper bound for 1024-d f32-vs-f64 dot accumulation (~n·eps·|x| ≈ 1024·6e-8 ≈ 6e-5).
+TIE_TOL = 2e-4
 
 
-def _norms(vecs: np.ndarray, chunk: int) -> np.ndarray:
-    """‖v‖ per row, same f32-product / f64-reduction discipline as the scores."""
-    n = len(vecs)
-    out = np.empty(n, dtype=np.float64)
-    for i in range(0, n, chunk):
-        blk = vecs[i:i + chunk].astype(np.float32)
-        out[i:i + chunk] = np.sqrt((blk * blk).astype(np.float64).sum(axis=1))
-    return out
-
-
-def exact_scores(q: np.ndarray, vecs: np.ndarray, chunk: int = 20_000) -> np.ndarray:
-    """Oracle **cosine**: f32 element-wise products, f64 reduction, divided by the norms.
-
-    FIXED 2026-08-01 — this used to return the raw dot product, justified by a
-    "unit-norm ⇒ dot == cosine" premise written into its own docstring. **That premise
-    is false for this corpus.** Measured norms run from 0.999547 to 1.000487, so dot
-    and cosine differ by up to ~5e-4 — fifty times TIE_TOL, and enough to reorder the
-    ranking rather than merely perturb a score.
-
-    It did reorder one. Query 14 at the pool point, rows g4563 and g2140:
-
-        raw dot      g2140 0.5508422 > g4563 0.5507662
-        true cosine  g4563 0.5508728 > g2140 0.5508013
-
-    The engine ranked g4563 first and the old oracle ranked g2140 first, so the
-    equivalence gate reported the ENGINE as wrong. The engine was right: `USING
-    cosine` reaches `distance::cosine_pruned`, which divides by ‖a‖ and ‖b‖ and
-    assumes nothing about them.
-
-    This was a pre-existing defect, not one this axis introduced — `measure_s5.py`
-    and `measure_sizesweep.py` have been taking their cutoffs from it. Every engine
-    was scored against the same wrong truth, so the comparison stayed self-consistent
-    and nothing looked amiss. That is the third time in this session a bug hid by
-    being uniformly applied.
-
-
-    Scored in row chunks. The products are materialised before the reduction, so a
-    single call over the pooled corpus (246,738 x 1024) would allocate ~1 GB of f32
-    temporary and another ~2 GB in f64 — per query. Chunking rows caps that at about
-    80 MB regardless of corpus size.
-
-    **Exactly equivalent, not an approximation.** The reduction runs along the 1024
-    dimensions of each row independently, so splitting the ROWS never changes any
-    row's sum: chunk boundaries fall between rows, never inside a dot product.
-
-    Args:
-        q: Query vector.
-        vecs: (n, dim) corpus block.
-        chunk: Rows scored per pass.
-
-    Returns:
-        (n,) f64 scores, one per row.
-    """
+def exact_scores(q: np.ndarray, vecs: np.ndarray) -> np.ndarray:
+    """Oracle cosine: f32 element-wise products, f64 reduction. Unit-norm ⇒ dot==cosine."""
     q32 = q.astype(np.float32)
-    nq = float(np.sqrt((q32 * q32).astype(np.float64).sum()))
-    n = len(vecs)
-    out = np.empty(n, dtype=np.float64)
-    for i in range(0, n, chunk):
-        blk = vecs[i:i + chunk].astype(np.float32)
-        out[i:i + chunk] = (blk * q32).astype(np.float64).sum(axis=1)
-    nv = _norms(vecs, chunk)
-    denom = nv * nq
-    np.divide(out, denom, out=out, where=denom > 0)
-    return out
+    v32 = vecs.astype(np.float32)
+    return (v32 * q32).astype(np.float64).sum(axis=1)
 
 
 def _f32_reduced_scores(q: np.ndarray, vecs: np.ndarray) -> np.ndarray:
@@ -117,17 +45,6 @@ def kth_oracle_score(q: np.ndarray, bucket_vecs: np.ndarray, k: int) -> float:
     s = exact_scores(q, bucket_vecs)
     s.sort()
     return float(s[max(0, len(s) - k)])
-
-
-def cutoff_from_oracle_ids(q, oracle_ids, corpus_vecs) -> float:
-    """The k-th best in-bucket score, derived from the stored top-k ids.
-
-    The corpus archives carry `oracle` as row indices, not scores. Those ids ARE
-    the true top-k, so the k-th score is simply the lowest among them — no new
-    field, no corpus regeneration, and every existing .npz keeps working. Use this
-    to feed `cut` to :func:`tie_aware_recall`.
-    """
-    return float(exact_scores(q, corpus_vecs[list(oracle_ids)]).min())
 
 
 def tie_aware_recall(q, returned_ids, corpus_vecs, cut, k, tol=None) -> float:

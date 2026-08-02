@@ -17,7 +17,6 @@ import threading
 import time
 
 import numpy as np
-import recall_harness as rh
 from adapters import ADAPTERS
 
 PORTS = {"xyzdb": 2505, "pgvector": 5432, "qdrant": 6333, "chroma": 8000}
@@ -78,77 +77,13 @@ def _git_short():
         return "?"
 
 
-# v2: the stamp carries all FOUR engines, not just ours. v1 recorded `xyzdb_image`
-# precisely and the rivals not at all — 825 of the 1106 published result files name
-# the xyzDB build, none names a rival's. That asymmetry is indefensible in a
-# comparative number: it means the published matrix cannot be reproduced (the
-# rivals ran at whatever `:latest` resolved to that day, unrecorded), and any
-# before/after between matrices moves two variables at once.
-#
-# `images_pinned` is the honest marker, not decoration: a run whose rival refs are
-# not digest-pinned says so IN THE DATA, so a result file can never look pinned
-# when it was not. The shell-side guard (`require_pinned_images` in images.env)
-# should stop that run before it starts; this is the belt to its braces, for the
-# case where a measure_*.py is invoked directly rather than through a runner.
-_RIVALS = ("PG", "QDRANT", "CHROMA")
-_RIVAL_IMAGES = {r.lower(): os.environ.get(f"IMG_{r}", "") for r in _RIVALS}
-_RIVAL_VERSIONS = {r.lower(): os.environ.get(f"VER_{r}", "") for r in _RIVALS}
-
 _STAMP = {"bench_commit": _git_short(),
-          "xyzdb_image": os.environ.get("XYZDB_IMG", ""),
-          "rival_images": _RIVAL_IMAGES,
-          "rival_versions": _RIVAL_VERSIONS,
-          "images_pinned": all("@sha256:" in v for v in _RIVAL_IMAGES.values()),
-          "images_pinned_on": os.environ.get("IMAGES_PINNED_ON", "")}
+          "xyzdb_image": os.environ.get("XYZDB_IMG", "")}
 
 
-def ghost_state(adapter):
-    """Which ghosts exist in the xyzDB cell RIGHT NOW — a named cell condition.
-
-    The engine materialises ghosts on its own, from scan telemetry, when a filter
-    shape repeats and is slow enough to be worth accelerating. So "no ghosts" is
-    not a property of the harness: it is a state the cell happens to be in, and a
-    cell that grew one mid-run is not the same cell it started as. Without this on
-    the record, two runs of the identical script are not comparable and nothing
-    says why.
-
-    Verified per cell, never assumed. It was assumed once — the xyzDB adapter's own
-    docstring claimed "Ghosts OFF (verified: SHOW GHOSTS empty after NEAREST-per-
-    bucket)" and the claim turned out to be true for the wrong reason: the fused
-    NEAREST emits no scan telemetry at all, so it cannot trigger one. True is not
-    the same as checked.
-
-    Returns ``"off"``, or ``"ON: <names>"`` — never a bare boolean, because the
-    names are what makes a contaminated cell diagnosable afterwards.
-    """
-    db = getattr(adapter, "db", None)
-    if db is None:
-        return "n/a"          # not xyzDB: no such mechanism, said rather than blank
-    try:
-        info = db.execute("SHOW GHOSTS").get("info", [])
-    except Exception as e:    # noqa: BLE001 — an unreadable state is not "off"
-        return f"unknown: {str(e)[:60]}"
-    names = [ln.strip().split(" ")[0] for ln in info
-             if ln.strip() and not ln.strip().startswith("Ghost Lobes")]
-    return "off" if not names else "ON: " + ",".join(names)
-
-
-def bench_stamp(adapter=None):
-    """Provenance stamp for a measured record — all four engines.
-
-    Keys: ``bench_commit``, ``xyzdb_image``, ``rival_images`` (digest-pinned refs),
-    ``rival_versions`` (human-readable, read from the live engines), and
-    ``images_pinned`` — False whenever any rival ref is not a digest, which is what
-    keeps an unpinned run from being mistaken for a reproducible one.
-
-    Pass the adapter to add ``ghosts``, the fifth condition: the four versions say
-    WHAT ran, and ``ghosts`` says what state the engine had organised itself into
-    while running. Omitting the adapter records ``"not_checked"`` rather than
-    ``"off"`` — an unasked question must never read as a clean answer.
-    """
-    st = dict(_STAMP)
-    st["ghosts"] = ghost_state(adapter) if adapter is not None else "not_checked"
-    return st
+def bench_stamp():
+    """Provenance stamp for a measured record: {bench_commit, xyzdb_image}."""
+    return dict(_STAMP)
 
 
 # ── post-load settle to state parity (change 3) ──────────────────────────────
@@ -249,20 +184,13 @@ def do_query(adapter, args, c, load_s):
         adapter.query(qvecs[j], int(qbucket[j]), k)
     sampler = PeakSampler(args.container); sampler.start()
     lat, rec = [], []
-    # TIE-AWARE recall: compare SCORES against the k-th in-bucket cutoff, not id
-    # sets. An id intersection marks an exact engine wrong for returning a different
-    # row with an identical score. Measured before changing it: boundary ties occur
-    # in 0% of queries at 500 buckets, 4.2% at 50, 5.8% at 5 — so the id gate held
-    # at the v1 point and breaks exactly where the locality axis takes v2. The
-    # cutoff comes from the stored oracle ids, so no corpus is regenerated.
-    vecs = c["vecs"]
-    cuts = [rh.cutoff_from_oracle_ids(qvecs[j], oracle[j], vecs) for j in range(nq)]
     for _ in range(max(1, args.repeats)):
         for j in range(nq):
+            oid = {int(x) for x in oracle[j]}
             t0 = time.perf_counter()
             got = adapter.query(qvecs[j], int(qbucket[j]), k)
             lat.append((time.perf_counter() - t0) * 1e3)
-            rec.append(rh.tie_aware_recall(qvecs[j], [int(x) for x in got], vecs, cuts[j], k))
+            rec.append(len(set(got) & oid) / k)
     peak = sampler.stop()
     a = np.array(lat)
     return {"kind": "query", "engine": args.engine, "envelope": args.envelope,
@@ -307,20 +235,11 @@ def main():
     ap.add_argument("--max_queries", type=int, default=0)
     ap.add_argument("--repeats", type=int, default=1)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--axis_point", type=int, default=500,
-                    help="locality granularity when --corpus is the axis store: "
-                         "500=user 50=group 5=big_group 1=pool")
     args = ap.parse_args()
     if not args.port:
         args.port = PORTS[args.engine]
 
-    # --corpus takes either a self-contained .npz or the shared axis store (a
-    # directory), in which case --axis_point names the locality granularity.
-    if os.path.isdir(args.corpus):
-        import bucket_axis
-        c = bucket_axis.load_point(args.corpus, args.axis_point)
-    else:
-        c = np.load(args.corpus)
+    c = np.load(args.corpus)
     dim = int(c["meta"][2])
     Adapter = ADAPTERS[args.engine]
     adapter = Adapter(host=args.host, port=args.port, dim=dim, hnsw=hnsw_from_env(args.engine))

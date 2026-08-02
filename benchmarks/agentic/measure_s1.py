@@ -103,7 +103,7 @@ def main():
         rec = {"kind": "s1", "engine": args.engine, "corpus": "lme", "envelope": args.envelope,
                "scoped": args.scoped, "qd_variant": qd, "storage": args.storage, "round": args.round,
                "status": st, "oom_at_s": at, "build_ram_peak_mb": round(bpeak, 1),
-               "setup": getattr(adapter, "setup_cost", None), "stamp": bench_stamp(adapter),
+               "setup": getattr(adapter, "setup_cost", None), "stamp": bench_stamp(),
                "note": f"died BUILDING over {len(turn_vecs)} vectors (not serving)", "err": str(e)[:120]}
         open(args.out, "a").write(json.dumps(rec) + "\n"); print(json.dumps(rec)); return
 
@@ -115,7 +115,7 @@ def main():
     except Exception as e:
         rec = {"kind": "s1", "engine": args.engine, "corpus": "lme", "envelope": args.envelope,
                "scoped": args.scoped, "qd_variant": qd, "storage": args.storage, "round": args.round,
-               "status": "settle_failed", "err": str(e)[:120], "stamp": bench_stamp(adapter)}
+               "status": "settle_failed", "err": str(e)[:120], "stamp": bench_stamp()}
         open(args.out, "a").write(json.dumps(rec) + "\n"); print(json.dumps(rec)); return
 
     sel = [(i, q) for i, q in enumerate(queries) if args.split == "all" or q["split"] == args.split]
@@ -159,7 +159,7 @@ def main():
         "build_ram_peak_mb": round(build_peak, 1), "query_ram_peak_mb": round(qpeak, 1),
         "disk_total_mb": disk_mb(args.volume, args.disk_path),   # payload-dup tax shows here
         "load_s": round(load_s, 1), "settle_ms": round(settle_ms, 1), "n_truncated": n_trunc,
-        "setup": getattr(adapter, "setup_cost", None), "status": None, "stamp": bench_stamp(adapter),
+        "setup": getattr(adapter, "setup_cost", None), "status": None, "stamp": bench_stamp(),
     }
     open(args.out, "a").write(json.dumps(rec) + "\n")
     print(json.dumps(rec))

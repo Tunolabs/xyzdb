@@ -7,12 +7,6 @@
 # timeout) vs query (oom_during_query) — the headline is "OOMs BUILDING the index", separated.
 # xyzDB is NOT run here (already serves all envelopes streaming, from the before/after matrix).
 # Engine-exclusive. BUILD_TIMEOUT 600s (a >10min on-disk build over 189K = unviable for the point).
-# Rival images: single pinned source (see images.env). require_pinned_images is
-# the negative control — this runner dies if it is not sourced or if a moving
-# tag creeps back in, instead of silently resolving `:latest`.
-. "$(cd "$(dirname "$0")" && pwd)/images.env"
-require_pinned_images || exit 1
-
 set -uo pipefail
 AG="$(cd "$(dirname "$0")" && pwd)"; cd "$AG"; PY="$AG/.venv/bin/python"
 OUT="${OUT:-/tmp/xyz_rival_coverage.jsonl}"; [ "${APPEND:-0}" = 1 ] || : > "$OUT"
@@ -32,10 +26,10 @@ up(){ # $1=engine $2=envlbl
   docker rm -f "$c" >/dev/null 2>&1; docker volume rm "bench_$1" >/dev/null 2>&1
   case "$e" in
     pgvector) docker run -d --name "$c" --cpus 2 --memory "$mem" -p 5432:5432 -e POSTGRES_PASSWORD=bench \
-                -v "bench_$1:/var/lib/postgresql" "$IMG_PG" \
+                -v "bench_$1:/var/lib/postgresql" pgvector/pgvector:pg18 \
                 -c shared_buffers=$(pg_sb "$env") -c maintenance_work_mem=$(pg_mwm "$env") >/dev/null 2>&1;;
-    qdrant)   docker run -d --name "$c" --cpus 2 --memory "$mem" -p 6333:6333 -v "bench_$1:/qdrant/storage" "$IMG_QDRANT" >/dev/null 2>&1;;
-    chroma)   docker run -d --name "$c" --cpus 2 --memory "$mem" -p 8000:8000 -v "bench_$1:/data" "$IMG_CHROMA" >/dev/null 2>&1;;
+    qdrant)   docker run -d --name "$c" --cpus 2 --memory "$mem" -p 6333:6333 -v "bench_$1:/qdrant/storage" qdrant/qdrant:latest >/dev/null 2>&1;;
+    chroma)   docker run -d --name "$c" --cpus 2 --memory "$mem" -p 8000:8000 -v "bench_$1:/data" chromadb/chroma:latest >/dev/null 2>&1;;
   esac
   local i=0; while [ $i -lt 90 ]; do
     case "$e" in

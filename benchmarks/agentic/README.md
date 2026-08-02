@@ -6,6 +6,11 @@ against `pgvector`, `qdrant`, and `chroma`, each in its idiomatic best-form conf
 the **same** corpus, queries, and machine. Consolidated results and methodology:
 [`docs/benchmark-agentic.md`](../../docs/benchmark-agentic.md).
 
+> **v2 in progress.** A second version of this benchmark is being built. What we
+> know about this harness and about the numbers already published — including what
+> does and does not affect them — is in [`KNOWN-ISSUES.md`](KNOWN-ISSUES.md). Read it
+> before citing a cell.
+
 This directory is self-contained: it drives the engines over the wire using the minimal
 reference client shipped in [`examples/client/python`](../../examples/client/python) — no
 external SDK. The only out-of-repo input is the public LongMemEval dataset, which

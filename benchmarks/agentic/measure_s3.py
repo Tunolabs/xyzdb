@@ -143,7 +143,7 @@ def main():
             "step": target, "tenants": made, "per_tenant": PER_TENANT,
             "ram_mb": round(ram, 1), "ram_over_base_mb": round(ram - ram0, 1),
             "create_nth_ms": round(create_ms_last, 3) if create_ms_last else None,
-            "destroy_nth_ms": round(destroy_ms, 3), "status": None, "stamp": bench_stamp(adapter)}) + "\n")
+            "destroy_nth_ms": round(destroy_ms, 3), "status": None, "stamp": bench_stamp()}) + "\n")
         print(f"  {args.engine} {made} tenants: ram={ram:.0f}MiB create_nth={create_ms_last:.1f}ms")
     a.close()
 

@@ -79,7 +79,7 @@ def main():
         rec = {"kind": "s5", "engine": args.engine, "corpus": "lme", "envelope": args.envelope,
                "scoped": args.scoped, "storage": args.storage, "round": args.round,
                "status": st, "oom_at_s": at, "build_ram_peak_mb": round(bpeak, 1),
-               "setup": getattr(adapter, "setup_cost", None), "err": str(e)[:120], "stamp": bench_stamp(adapter)}
+               "setup": getattr(adapter, "setup_cost", None), "err": str(e)[:120], "stamp": bench_stamp()}
         open(args.out, "a").write(json.dumps(rec) + "\n"); print(json.dumps(rec)); return
 
     # Post-load settle to state parity (change 3): restart+reconnect so the query &
@@ -89,7 +89,7 @@ def main():
     except Exception as e:
         rec = {"kind": "s5", "engine": args.engine, "corpus": "lme", "envelope": args.envelope,
                "scoped": args.scoped, "storage": args.storage, "round": args.round,
-               "status": "settle_failed", "err": str(e)[:120], "stamp": bench_stamp(adapter)}
+               "status": "settle_failed", "err": str(e)[:120], "stamp": bench_stamp()}
         open(args.out, "a").write(json.dumps(rec) + "\n"); print(json.dumps(rec)); return
 
     sel = [(i, q) for i, q in enumerate(queries) if args.split == "all" or q["split"] == args.split]
@@ -128,7 +128,7 @@ def main():
             "p99_ms": round(float(np.percentile(a, 99)), 3),
             "mean_ms": round(float(a.mean()), 3),
             "load_s": round(load_s, 1), "settle_ms": round(settle_ms, 1),
-            "setup": getattr(adapter, "setup_cost", None), "status": None, "stamp": bench_stamp(adapter),
+            "setup": getattr(adapter, "setup_cost", None), "status": None, "stamp": bench_stamp(),
         }
         open(args.out, "a").write(json.dumps(rec) + "\n")
         print(json.dumps(rec))
@@ -140,7 +140,7 @@ def main():
         "scoped": args.scoped, "storage": args.storage, "round": args.round,
         "build_ram_peak_mb": round(build_peak, 1), "query_ram_peak_mb": round(qpeak, 1),
         "disk_total_mb": disk_mb(args.volume, args.disk_path), "status": None,
-        "stamp": bench_stamp(adapter)}) + "\n")
+        "stamp": bench_stamp()}) + "\n")
 
 
 if __name__ == "__main__":

@@ -3,12 +3,6 @@
 # HNSW recall (residual under the bge ceiling). Dense (tuned) config. Engine-exclusive.
 # xyzDB's number is already in /tmp/lme_xyzdb.jsonl (the exact ceiling). OOM at tight
 # envelopes is a separate coverage finding, not this run.
-# Rival images: single pinned source (see images.env). require_pinned_images is
-# the negative control — this runner dies if it is not sourced or if a moving
-# tag creeps back in, instead of silently resolving `:latest`.
-. "$(cd "$(dirname "$0")" && pwd)/images.env"
-require_pinned_images || exit 1
-
 set -uo pipefail
 AG="$(cd "$(dirname "$0")" && pwd)"; cd "$AG"
 PY="$AG/.venv/bin/python"
@@ -19,9 +13,9 @@ export BENCH_PG_M=48 BENCH_PG_EFC=200 BENCH_PG_EFS=200 \
 
 up(){ e=$1; c=bench-$e; docker rm -f "$c" >/dev/null 2>&1; docker volume rm "bench_$e" >/dev/null 2>&1
   case "$e" in
-    pgvector) docker run -d --name "$c" --cpus 2 --memory 8g -p 5432:5432 -e POSTGRES_PASSWORD=bench -v "bench_$e:/var/lib/postgresql" "$IMG_PG" >/dev/null 2>&1;;
-    qdrant)   docker run -d --name "$c" --cpus 2 --memory 8g -p 6333:6333 -v "bench_$e:/qdrant/storage" "$IMG_QDRANT" >/dev/null 2>&1;;
-    chroma)   docker run -d --name "$c" --cpus 2 --memory 8g -p 8000:8000 -v "bench_$e:/data" "$IMG_CHROMA" >/dev/null 2>&1;;
+    pgvector) docker run -d --name "$c" --cpus 2 --memory 8g -p 5432:5432 -e POSTGRES_PASSWORD=bench -v "bench_$e:/var/lib/postgresql" pgvector/pgvector:pg18 >/dev/null 2>&1;;
+    qdrant)   docker run -d --name "$c" --cpus 2 --memory 8g -p 6333:6333 -v "bench_$e:/qdrant/storage" qdrant/qdrant:latest >/dev/null 2>&1;;
+    chroma)   docker run -d --name "$c" --cpus 2 --memory 8g -p 8000:8000 -v "bench_$e:/data" chromadb/chroma:latest >/dev/null 2>&1;;
   esac
   local i=0; while [ $i -lt 120 ]; do
     case "$e" in

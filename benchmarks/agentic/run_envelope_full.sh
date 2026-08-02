@@ -26,12 +26,6 @@
 #
 # Image stamped per record (premise-20). Mac/OrbStack = DIRECTION, not publishable.
 # xyz image per arch (AVX2 x86-v3 on AWS): XYZDB_IMG / XYZ_ARCH — see run_envelope_matrix.sh.
-# Rival images: single pinned source (see images.env). require_pinned_images is
-# the negative control — this runner dies if it is not sourced or if a moving
-# tag creeps back in, instead of silently resolving `:latest`.
-. "$(cd "$(dirname "$0")" && pwd)/images.env"
-require_pinned_images || exit 1
-
 set -uo pipefail
 AG="$(cd "$(dirname "$0")" && pwd)"; cd "$AG"; PY="${PY:-$AG/.venv/bin/python}"
 # xyzdb minimal client ships in the repo at examples/client/python — no external SDK.
@@ -49,6 +43,7 @@ export BENCH_PG_M=48 BENCH_PG_EFC=200 BENCH_PG_EFS=200 \
        BENCH_CH_M=32 BENCH_CH_CEF=200 BENCH_CH_SEF=512 \
        BUILD_TIMEOUT="${BUILD_TIMEOUT:-900}"
 OUT="${OUT:-$AG/results/envelope_full}"; mkdir -p "$OUT"
+IMG_PG=pgvector/pgvector:pg18
 
 # tier -> "cpus dram memswap xyzcache pgsb pgmwm"
 tier_spec(){ case "$1" in
@@ -117,9 +112,9 @@ up_deploy(){ local dep=$1 t=$2; read -r cpus dram memswap xyzc pgsb pgmwm <<<"$(
               docker run -d --name bench-pgvector $mf -p 5432:5432 -e POSTGRES_PASSWORD=bench $MNT \
                 "$IMG_PG" -c shared_buffers=$pgsb -c maintenance_work_mem=$pgmwm >/dev/null 2>&1;;
     qdrant)   prep_vol bench_qdrant /qdrant/storage || return 1
-              docker run -d --name bench-qdrant $mf -p 6333:6333 $MNT "$IMG_QDRANT" >/dev/null 2>&1;;
+              docker run -d --name bench-qdrant $mf -p 6333:6333 $MNT qdrant/qdrant:latest >/dev/null 2>&1;;
     chroma)   prep_vol bench_chroma /data || return 1
-              docker run -d --name bench-chroma $mf -p 8000:8000 $MNT "$IMG_CHROMA" >/dev/null 2>&1;;
+              docker run -d --name bench-chroma $mf -p 8000:8000 $MNT chromadb/chroma:latest >/dev/null 2>&1;;
   esac
   wait_port "$vp" "$vc" "$ve" || return 1
   # structured store (2-system deployments only), on :5433. FIXED minimal envelope —

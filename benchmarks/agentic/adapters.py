@@ -12,20 +12,6 @@ p99≤50ms) and frozen for held-out.
 """
 import os
 from typing import List
-
-# Where the engines answer. 127.0.0.1 when a runner is invoked on the host;
-# `host.docker.internal` when the harness itself runs in `Dockerfile.bench`, which
-# is how the rival CLIENTS get pinned alongside their servers instead of inheriting
-# whatever Python the host has. One env var rather than a parameter threaded
-# through every call site — the address is a property of where the harness runs,
-# not of any single measurement.
-DEFAULT_ENGINE_HOST = os.environ.get("BENCH_ENGINE_HOST", "127.0.0.1")
-
-# Added to every engine's standard port. The containers always listen on their own
-# ports; only the published host port moves, because a development machine may
-# already be using one (this one runs a project postgres on 5432). Read from the
-# same env var `lib_docker.sh` publishes with, so shell and Python cannot disagree.
-PORT_OFFSET = int(os.environ.get("BENCH_PORT_OFFSET", "0"))
 import numpy as np
 
 BATCH = 2000
@@ -41,49 +27,14 @@ XYZ_PUT_BATCH = 600
 PG_MAINT_WORK_MEM = os.environ.get("BENCH_PG_MWM", "2GB")
 
 
-# The last partial reported by `_xyz_ids_from_json`, for the caller that wants it.
-# A module-level slot rather than a changed return type: every existing call site
-# reads a list of ids, and widening that signature would touch scenarios this
-# change has no business editing.
-LAST_PARTIAL: dict = {}
-
-
 def _xyz_ids_from_json(resp: dict) -> List[int]:
-    """Extract integer turn ids (`g<i>` -> i) from a raw xyzDB JSON response.
-
-    ALSO records whether the answer was a partial. This function used to read
-    `records` and nothing else, so a `NEAREST` cut short by the latency airbag —
-    which says so, in `budget_stop`, and marks the frame `has_more` — arrived here
-    looking exactly like a complete answer. The missing rows would then have been
-    scored as MISSED RECALL: xyzDB penalised for the one thing it did right, which
-    is announcing that it stopped early.
-
-    It is the same defect the three client SDKs were just fixed for, sitting in the
-    benchmark's own extractor. A partial belongs in its own column and must never
-    be folded into a recall number — those are different facts and only one of them
-    is about search quality.
-    """
-    resp = resp or {}
-    LAST_PARTIAL.clear()
-    if resp.get("budget_stop") or resp.get("has_more"):
-        LAST_PARTIAL.update({"partial": True,
-                             "budget_stop": resp.get("budget_stop"),
-                             "has_more": bool(resp.get("has_more"))})
+    """Extract integer turn ids (`g<i>` -> i) from a raw xyzDB JSON response."""
     out = []
-    for r in resp.get("records", []):
+    for r in (resp or {}).get("records", []):
         rid = r.get("id")
         if isinstance(rid, str) and rid.startswith("g") and rid[1:].isdigit():
             out.append(int(rid[1:]))
     return out
-
-
-def xyz_last_partial() -> dict:
-    """The partial report from the most recent `_xyz_ids_from_json`, or `{}`.
-
-    Empty means the last answer was complete — not that nobody looked, which is why
-    the caller reads this rather than inferring completeness from a row count.
-    """
-    return dict(LAST_PARTIAL)
 
 
 def _xyz_nearest(db, lobe: str, bucket_val: str, qvec, k: int) -> list:
@@ -98,55 +49,17 @@ def _xyz_nearest(db, lobe: str, bucket_val: str, qvec, k: int) -> list:
     return out.get("records", []) or []
 
 
-# ── The structured fields that travel with every record — DECLARED ONCE ──────
-#
-# These used to be named literally ("topic", "status", "importance") in four
-# separate places: the chroma metadata builder, the xyzDB record builder, the pg
-# column list and row builder, and the qdrant payload builder. Adding a field meant
-# finding all four, and two fields the v2 design needs had been added to the corpus
-# without reaching any engine.
-#
-# `tenant` is the one that blocks whole questions. It is the original question-id —
-# the user. At the `user` granularity nobody notices it is missing, because the
-# bucket IS the tenant; from `group` outward the bucket is the pool and the tenant
-# vanishes from the engine entirely. Without it, "what did THIS user tell me" cannot
-# be expressed on the coarse half of the axis, the pooled Q3 has no residual to
-# filter on, and the result worth selling — pooling tenants costs nothing if you
-# declare the tenant as the satellite axis — has no field to declare.
-#
-# (name, python caster, pg column type). Order fixes the pg column order.
-EXTRA_FIELDS = [
-    ("tenant", str, "text"),              # the user — structural, see above
-    ("topic", int, "int"),                # S5b range sweep
-    ("status", str, "text"),              # Q4 aggregate filter
-    ("importance", float, "double precision"),   # Q4 aggregate value
-    ("cat2", int, "int"),                 # Q3 equality sweep: selectivity 1/2
-    ("cat10", int, "int"),                #                    1/10
-    ("cat100", int, "int"),               #                    1/100
-    ("cat1000", int, "int"),              #                    1/1000
-]
-
-
-def present_fields(meta):
-    """The declared fields actually supplied by this run, in declaration order.
-
-    A scenario passes only what it needs, so the adapters carry the intersection
-    rather than demanding every field exist.
-    """
-    if meta is None:
-        return []
-    return [(n, c, t) for (n, c, t) in EXTRA_FIELDS if n in meta]
-
-
 def _chroma_md(i, bids, sids, meta, with_bucket):
-    """Per-turn chroma metadata dict (bucket/sid + every declared field present)."""
+    """Per-turn chroma metadata dict (bucket/sid/topic/status/importance as present)."""
     d = {}
     if with_bucket:
         d["bucket"] = int(bids[i])
     if sids is not None:
         d["sid"] = str(sids[i])
-    for name, cast, _ in present_fields(meta):
-        d[name] = cast(meta[name][i])
+    if meta is not None:
+        d["topic"] = int(meta["topic"][i])
+        d["status"] = str(meta["status"][i])
+        d["importance"] = float(meta["importance"][i])
     return d
 
 
@@ -155,57 +68,32 @@ class XyzdbAdapter:
     envelope. Ghosts OFF (verified: SHOW GHOSTS empty after NEAREST-per-bucket). No dial."""
     name = "xyzdb"
 
-    def __init__(self, host=DEFAULT_ENGINE_HOST, port=2505 + PORT_OFFSET, dim=1024, scoped=True,
-                 satellite=None, lobe="mem", **_):
+    def __init__(self, host="127.0.0.1", port=2505, dim=1024, scoped=True, **_):
         import xyzdb_minimal as xyzdb
-        self.db = xyzdb.connect(host, port, timeout=300.0)
-        # Named so the equivalence gate can hold the same rows twice — once with the
-        # axis declared and once without — and compare the two routes over the wire.
-        self.lobe = lobe
-        # The satellite axis is a CELL PARAMETER, not a property of the adapter.
-        # `SATELLITE BY` is refused on a non-empty lobe and cannot be changed
-        # afterwards, so each (granularity, axis) pair is its own load: Q3-scoped
-        # wants gravity=tenant with axis=catN, Q3-pool wants gravity=pool with the
-        # tenant residual, and the multi-tenant result wants gravity=group with
-        # axis=TENANT. Hardwiring it here would silently make one of those
-        # impossible. Thirteen distinct loads at 246,738 rows each — worth counting
-        # before launching rather than discovering mid-matrix.
-        self.satellite = satellite
+        self.db = xyzdb.connect(host, port)
+        self.lobe = "mem"
 
     def load(self, vecs, bids, hnsw=None, sids=None, meta=None):
         # DDL via execute() — the minimal client has no typed create_lobe/create_vector/
-        # gravity_by helpers; these statements are their exact equivalent.
+        # gravity_by helpers; these three statements are their exact equivalent.
         self.db.execute(f'LOBE "{self.lobe}" HINT="agentic"')
         self.db.execute(f'VECTOR emb IN "{self.lobe}"')
         self.db.execute(f'GRAVITY BY bucket IN "{self.lobe}"')
-        if self.satellite:
-            # Declared BEFORE the first write: the engine refuses it on a non-empty
-            # lobe, because existing rows would stay at satellite 0 where a bounded
-            # query cannot reach them.
-            self.db.execute(f'SATELLITE BY {self.satellite} IN "{self.lobe}"')
         for s in range(0, len(vecs), XYZ_PUT_BATCH):
             recs = []
             for i in range(s, min(s + XYZ_PUT_BATCH, len(vecs))):
                 r = {"*bucket": str(bids[i]), "id": f"g{i}", "emb": vecs[i].tolist()}
                 if sids is not None:  # S1: session id co-located in the same gravity bucket
                     r["sid"] = str(sids[i])
-                for name, cast, _ in present_fields(meta):  # structured fields, SAME record
-                    r[name] = cast(meta[name][i])
+                if meta is not None:  # S5/S6: structured fields in the SAME record
+                    r["topic"] = int(meta["topic"][i])
+                    r["status"] = str(meta["status"][i])
+                    r["importance"] = float(meta["importance"][i])
                 recs.append(r)
             self.db.put_batch(self.lobe, recs)
-        # Operational cost of scoping (the moat): xyzDB scopes by DECLARING it.
-        # The count moves with the satellite so it stays honest — one line without an
-        # axis, two with. Two lines against pg's 50,000 statements and 145.7s for the
-        # same effect (see the P6 viability result); a stale `1` would be flattering
-        # by inertia rather than by measurement.
-        if self.satellite:
-            self.setup_cost = {
-                "kind": "gravity+satellite-declared", "structures": 1, "ddl_lines": 2,
-                "note": f"GRAVITY BY bucket + SATELLITE BY {self.satellite}; "
-                        "co-location and sub-bucketing are declarations, not structures"}
-        else:
-            self.setup_cost = {"kind": "gravity-declared", "structures": 1, "ddl_lines": 1,
-                               "note": "1 GRAVITY BY declaration; scope co-location is free"}
+        # Operational cost of scoping (the moat): xyzDB scopes by DECLARING gravity.
+        self.setup_cost = {"kind": "gravity-declared", "structures": 1, "ddl_lines": 1,
+                           "note": "1 GRAVITY BY declaration; scope co-location is free"}
 
     def query(self, qvec, bucket, k) -> List[int]:
         recs = _xyz_nearest(self.db, self.lobe, str(bucket), qvec, k)
@@ -254,7 +142,7 @@ class XyzdbAdapter:
 class PgvectorAdapter:
     name = "pgvector"
 
-    def __init__(self, host=DEFAULT_ENGINE_HOST, port=5432 + PORT_OFFSET, dim=1024, hnsw=None, scoped=False, **_):
+    def __init__(self, host="127.0.0.1", port=5432, dim=1024, hnsw=None, scoped=False, **_):
         import psycopg2
         from pgvector.psycopg2 import register_vector
         self.dim, self.scoped = dim, scoped
@@ -283,8 +171,8 @@ class PgvectorAdapter:
         extra = ""
         if self._has_sid:
             extra += ", sid text"
-        for name, _, sqltype in present_fields(meta):
-            extra += f", {name} {sqltype}"
+        if self._has_meta:
+            extra += ", topic int, status text, importance float8"
         if self.scoped:
             # one partition per bucket → WHERE bucket=X prunes to a small per-bucket HNSW.
             cur.execute(f"CREATE TABLE items (gid int, bucket int{extra}, emb vector({self.dim})) PARTITION BY LIST (bucket)")
@@ -301,7 +189,8 @@ class PgvectorAdapter:
         cols_l = ["gid", "bucket"]
         if self._has_sid:
             cols_l.append("sid")
-        cols_l += [n for n, _, _ in present_fields(meta)]
+        if self._has_meta:
+            cols_l += ["topic", "status", "importance"]
         cols_l.append("emb")
         cols = ",".join(cols_l)
         tmpl = "(" + ",".join(["%s"] * len(cols_l)) + ")"
@@ -310,7 +199,8 @@ class PgvectorAdapter:
             row = [int(i), int(bids[i])]
             if self._has_sid:
                 row.append(str(sids[i]))
-            row += [cast(meta[name][i]) for name, cast, _ in present_fields(meta)]
+            if self._has_meta:
+                row += [int(meta["topic"][i]), str(meta["status"][i]), float(meta["importance"][i])]
             row.append(vecs[i])
             rows.append(tuple(row))
         for s in range(0, len(rows), BATCH):
@@ -394,7 +284,7 @@ class PgvectorAdapter:
 class QdrantAdapter:
     name = "qdrant"
 
-    def __init__(self, host=DEFAULT_ENGINE_HOST, port=6333 + PORT_OFFSET, dim=1024, hnsw=None, scoped=False,
+    def __init__(self, host="127.0.0.1", port=6333, dim=1024, hnsw=None, scoped=False,
                  s1_variant="scroll", **_):
         from qdrant_client import QdrantClient
         self.dim, self.scoped = dim, scoped
@@ -432,28 +322,10 @@ class QdrantAdapter:
                 collection_name=self.coll, field_name="sid",
                 field_schema=models.KeywordIndexParams(type=models.KeywordIndexType.KEYWORD))
         if self._has_meta:
-            # A payload index for EVERY declared field this run supplies, derived
-            # from the declaration instead of a hand-written list.
-            #
-            # The hand-written version indexed `bucket`, `sid` and `topic`; the
-            # `catN` fields were added later for the Q3 selectivity sweep and never
-            # reached it. The route control caught it — `field_is_indexed: False` on
-            # all four — and it is a handicap WE introduced, not one qdrant has: its
-            # filterable-HNSW needs the payload index to apply a filter inside the
-            # graph traversal. Measuring latency against an engine we quietly denied
-            # its own index is the mirror image of the strawman this benchmark
-            # refuses to build for itself.
-            #
-            # Deriving it from EXTRA_FIELDS means the next field added to the corpus
-            # cannot repeat this: a field the harness filters on is a field qdrant
-            # gets an index for, by construction.
-            _QD_SCHEMA = {int: models.PayloadSchemaType.INTEGER,
-                          float: models.PayloadSchemaType.FLOAT,
-                          str: models.PayloadSchemaType.KEYWORD}
-            for name, cast, _ in present_fields(meta):
-                self.client.create_payload_index(
-                    collection_name=self.coll, field_name=name,
-                    field_schema=_QD_SCHEMA[cast])
+            # Integer payload index on topic → filterable-HNSW applies the range filter
+            # DURING graph traversal, not as a post-filter (qdrant's strong S5 feature).
+            self.client.create_payload_index(collection_name=self.coll, field_name="topic",
+                                             field_schema=models.PayloadSchemaType.INTEGER)
         qb = 250   # qdrant caps the HTTP payload at ~32MB; 250×1024d ≈ 5MB, safe
         for s in range(0, len(vecs), qb):
             pts = []
@@ -463,8 +335,10 @@ class QdrantAdapter:
                     pl["sid"] = str(sids[i])
                     if self.s1_variant == "payload-dup":
                         pl["sess"] = by_bs[(str(int(bids[i])), str(sids[i]))]
-                for name, cast, _ in present_fields(meta):
-                    pl[name] = cast(meta[name][i])
+                if self._has_meta:
+                    pl["topic"] = int(meta["topic"][i])
+                    pl["status"] = str(meta["status"][i])
+                    pl["importance"] = float(meta["importance"][i])
                 pts.append(models.PointStruct(id=int(i), vector=vecs[i].tolist(), payload=pl))
             self.client.upsert(collection_name=self.coll, points=pts, wait=True)
         self._ef = hnsw.get("ef", 128)
@@ -547,7 +421,7 @@ class QdrantAdapter:
 class ChromaAdapter:
     name = "chroma"
 
-    def __init__(self, host=DEFAULT_ENGINE_HOST, port=8000 + PORT_OFFSET, dim=1024, hnsw=None, scoped=False, **_):
+    def __init__(self, host="127.0.0.1", port=8000, dim=1024, hnsw=None, scoped=False, **_):
         import chromadb
         self.client = chromadb.HttpClient(host=host, port=port)
         self.dim, self.scoped = dim, scoped

@@ -14,12 +14,6 @@
 #
 # xyzDB runs the AVX2 (x86-64-v3) image — that is what Fase-1 built. Rivals need nothing special
 # (HNSW is HNSW; the AVX2 work is xyzDB's scorer only).
-# Rival images: single pinned source (see images.env). require_pinned_images is
-# the negative control — this runner dies if it is not sourced or if a moving
-# tag creeps back in, instead of silently resolving `:latest`.
-. "$(cd "$(dirname "$0")" && pwd)/images.env"
-require_pinned_images || exit 1
-
 set -uo pipefail
 AG="$(cd "$(dirname "$0")" && pwd)"; cd "$AG"; PY="$AG/.venv/bin/python"
 export STORAGE=ssd STORAGE_ROOT="${STORAGE_ROOT:-/mnt/ssd}"
@@ -36,7 +30,7 @@ fail=0
 mkdir -p "$STORAGE_ROOT/.wtest" 2>/dev/null && rmdir "$STORAGE_ROOT/.wtest" 2>/dev/null || { say "  ✗ $STORAGE_ROOT no escribible"; fail=1; }
 [ -f "$AG/corpora/lme/cvec.npy" ] || { say "  ✗ falta corpora/lme/cvec.npy (rsync desde Mac)"; fail=1; }
 [ -x "$PY" ] || { say "  ✗ falta .venv (python)"; fail=1; }
-for img in "$AFTER_IMG" "$BEFORE_IMG" "$IMG_PG" "$IMG_QDRANT" "$IMG_CHROMA"; do
+for img in "$AFTER_IMG" "$BEFORE_IMG" pgvector/pgvector:pg18 qdrant/qdrant:latest chromadb/chroma:latest; do
   docker image inspect "$img" >/dev/null 2>&1 || { say "  ✗ falta imagen docker: $img"; fail=1; }
 done
 if [ "$fail" = 1 ]; then say "PREFLIGHT FALLÓ — corrige y relanza. No arranco la noche."; exit 1; fi

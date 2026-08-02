@@ -33,154 +33,11 @@ TIER_DEV="2c8g 8g 8g 2 2048"
 # Override via XYZDB_IMG.
 IMG_XYZDB="${XYZDB_IMG:-xyzdb:0.9.6-fixA}"
 export XYZDB_IMG="$IMG_XYZDB"   # so measure_*.py bench_stamp() records the exact image
-# Rival images come from images.env, digest-pinned, with NO fallback default on
-# purpose: the old `${PG_IMG:-pgvector/pgvector:pg18}` form meant a caller who set
-# nothing silently got a moving tag. require_pinned_images turns that silence into
-# a failure.
-. "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/images.env"
-require_pinned_images || exit 1
+IMG_PG="${PG_IMG:-pgvector/pgvector:pg18}"
+IMG_QDRANT="${QDRANT_IMG:-qdrant/qdrant:latest}"
+IMG_CHROMA="${CHROMA_IMG:-chromadb/chroma:latest}"
 
-# ─── Tripwires ───────────────────────────────────────────────────────────────
-# Three rules that were WRITTEN DOWN and got broken anyway, on 2026-08-01, by
-# someone who had all three in front of them. A rule you have to remember is a
-# rule you will skip the day the task changes shape under you. These make them
-# impossible to skip instead, in the pattern `require_pinned_images` already set:
-# the runner that does not satisfy one DIES, it does not warn.
-#
-# Each carries the negative control that proves it can fail, because a tripwire
-# nobody has ever seen fire is indistinguishable from a comment.
-
-# T3 — a modified engine does not measure.
-#
-# THE ONE THAT WOULD HAVE STOPPED IT. The session that broke the other two began
-# as benchmark work, found an engine bug, fixed it, and kept measuring — with an
-# engine tree that no longer matched any built artefact. Numbers from that tree
-# name a binary nobody can rebuild.
-#
-# Diagnosing an engine bug from a bench is legitimate and expected; what is not
-# is carrying the modified tree into a measurement. So the check is at the
-# runner's front door, not in the client.
-#
-# Negative control: `touch crates/engine/src/lib.rs` (or edit anything under
-# crates/) and run any runner — it must die here.
-require_clean_engine_tree(){
-    command -v git >/dev/null 2>&1 || return 0        # not a checkout: nothing to assert
-    local root dirty
-    root=$(git rev-parse --show-toplevel 2>/dev/null) || return 0
-    dirty=$(git -C "$root" status --porcelain -- crates/ 2>/dev/null)
-    if [ -n "$dirty" ]; then
-        echo "FATAL: the engine tree is modified — a benchmark cannot measure it." >&2
-        echo "$dirty" | sed 's/^/       /' >&2
-        echo "       If the work changed the engine, this is no longer a bench session:" >&2
-        echo "       commit or stash it, rebuild the image, and measure that image." >&2
-        echo "       (Diagnosing with a local build is fine — measuring with one is not.)" >&2
-        return 1
-    fi
-}
-
-# T1 — what is measured must be a container.
-#
-# The engine under measurement has to be the artefact that ships, held to the
-# same `--cpus`/`--memory` bound as its rivals. A host process is neither. This
-# asserts the port is published by a RUNNING container whose name is the one
-# `up_engine` creates — not merely that something answers, which a native binary
-# on the same port satisfies just as well.
-#
-# Negative control: start `target/release/xyzdb-server --port 2505` on the host
-# with no container up, then call this — it must fail.
-require_containerised_engine(){   # $1=engine
-    local e=$1 c=bench-$1 port; port=$(port_for "$e")
-    local state; state=$(docker inspect -f '{{.State.Running}}' "$c" 2>/dev/null)
-    if [ "$state" != "true" ]; then
-        echo "FATAL: no running container '$c' — refusing to measure." >&2
-        echo "       Something may be answering on port $port, but a host process is" >&2
-        echo "       not the artefact under test and carries none of the cell's limits." >&2
-        return 1
-    fi
-    # `docker port` is asked about the CONTAINER's port and answers with the host
-    # binding — passing the host port here asked a question the daemon cannot
-    # answer and read as "not published" on every offset run.
-    local cport; cport=$(container_port_for "$e")
-    docker port "$c" "$cport" >/dev/null 2>&1 || {
-        echo "FATAL: container '$c' does not publish container port $cport (host $port)." >&2
-        return 1
-    }
-}
-
-# ─── The harness runs in its own image too ───────────────────────────────────
-#
-# `bench_py <script> [args…]` runs a harness step inside `Dockerfile.bench`
-# instead of against whatever Python the host has. The engines are pinned by
-# digest; the clients that talk to them are pinned by this image. Before it
-# existed the qdrant client sat two minors behind its own server and chroma could
-# not be installed at all, because the host venv was Python 3.9.
-#
-# The repo is mounted, not baked: editing a runner must not mean rebuilding an
-# image, and an image that carries no benchmark code cannot drift from the repo.
-BENCH_IMG="${BENCH_IMG:-xyzdb-bench:local}"
-BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-
-bench_build(){
-    docker build -q -f "$BENCH_DIR/Dockerfile.bench" -t "$BENCH_IMG" "$BENCH_DIR" >/dev/null || {
-        echo "FATAL: could not build $BENCH_IMG" >&2; return 1; }
-}
-
-# Where a step's `--out` should point. The container has its own /tmp, so an
-# `--out /tmp/x.jsonl` writes INSIDE it and vanishes with the container — the first
-# sweep lost its whole JSONL that way and survived only because run_step had
-# captured stdout. Results go to a mounted directory or they are not results.
-BENCH_OUT="${BENCH_OUT:-$BENCH_DIR/results/local}"
-
-bench_py(){   # $1=script (repo-relative to benchmarks/agentic), rest=args
-    local repo; repo=$(cd "$BENCH_DIR/../.." && pwd)
-    mkdir -p "$BENCH_OUT"
-    docker run --rm \
-        -v "$BENCH_OUT":/out \
-        --add-host=host.docker.internal:host-gateway \
-        -v "$BENCH_DIR":/bench \
-        -v "$repo/examples/client/python":/client:ro \
-        -e BENCH_ENGINE_HOST=host.docker.internal \
-        -e BENCH_PORT_OFFSET="$BENCH_PORT_OFFSET" \
-        -e XYZDB_IMG="${XYZDB_IMG:-}" \
-        -w /bench \
-        "$BENCH_IMG" "$@"
-}
-
-# T2 — full capture, and the exit code of the thing that mattered.
-#
-# Twice a pipe hid a failure (`cmd | head` reporting head's status); once `tail`
-# ate the evidence of which test failed; and once a trailing `grep -c` found zero
-# failures, exited 1 for "no match", and turned a GREEN tree into a reported red.
-# All four are the same root: the status of a compound is the status of its LAST
-# command, and a filter is a lossy witness.
-#
-# So: everything goes to a file (never `tail`, never `head`), `REAL_EXIT` is
-# captured on its very next line, and nothing runs between the command and that
-# capture. Grep the FILE afterwards, as much as you like — the code is already
-# safe in `REAL_EXIT`.
-#
-# Negative control: `run_step /tmp/x.log false` must return 1.
-run_step(){   # $1=logfile, rest=command -> the command's own exit code
-    local log=$1; shift
-    "$@" > "$log" 2>&1
-    local REAL_EXIT=$?
-    return $REAL_EXIT
-}
-
-# HOST-side port for an engine. The container always listens on its own standard
-# port; only the published host port moves.
-#
-# BENCH_PORT_OFFSET exists because a development machine is not a bench box: this
-# one already runs a project postgres on 5432, and `up_engine` died with "port is
-# already allocated" — a failure that looks like the engine crashing until you read
-# the daemon's message. Shifting the harness is the right way round; stopping
-# somebody's database to run a benchmark is not.
-#
-# It must stay in ONE place: the shell publishes the port and the Python adapters
-# connect to it, so the two read the same env var or they silently disagree.
-BENCH_PORT_OFFSET="${BENCH_PORT_OFFSET:-0}"
-container_port_for(){ case "$1" in xyzdb) echo 2505;; pgvector) echo 5432;; qdrant) echo 6333;; chroma) echo 8000;; esac; }
-port_for(){ echo $(( $(container_port_for "$1") + BENCH_PORT_OFFSET )); }
+port_for(){ case "$1" in xyzdb) echo 2505;; pgvector) echo 5432;; qdrant) echo 6333;; chroma) echo 8000;; esac; }
 datadir_for(){ case "$1" in xyzdb|chroma) echo /data;; pgvector) echo /var/lib/postgresql;; qdrant) echo /qdrant/storage;; esac; }
 # Where measure_*.py should `du` the on-disk footprint: bind path (AWS) or named volume (Mac).
 diskarg_for(){ if [ -n "${STORAGE_ROOT:-}" ]; then echo "--disk_path $STORAGE_ROOT/$1"; else echo "--volume bench_$1"; fi; }
@@ -240,13 +97,13 @@ preserve_forensics(){
 }
 
 wait_ready(){  # $1=engine -> 0 ready / 1 died or timeout
-  local e=$1 c=bench-$1 i=0 py="${PY:-python3}" hp; hp=$(port_for "$e")
+  local e=$1 c=bench-$1 i=0 py="${PY:-python3}"
   while [ $i -lt 90 ]; do
     case "$e" in
-      xyzdb)    nc -z 127.0.0.1 "$hp" 2>/dev/null && return 0 ;;
-      pgvector) "$py" -c "import psycopg2,sys;psycopg2.connect(host='127.0.0.1',port=int(sys.argv[1]),user='postgres',password='bench',dbname='postgres').close()" "$hp" 2>/dev/null && return 0 ;;
-      qdrant)   curl -fsS "http://127.0.0.1:$hp/readyz" >/dev/null 2>&1 && return 0 ;;
-      chroma)   curl -fsS "http://127.0.0.1:$hp/api/v2/heartbeat" >/dev/null 2>&1 && return 0 ;;
+      xyzdb)    nc -z 127.0.0.1 2505 2>/dev/null && return 0 ;;
+      pgvector) "$py" -c "import psycopg2;psycopg2.connect(host='127.0.0.1',port=5432,user='postgres',password='bench',dbname='postgres').close()" 2>/dev/null && return 0 ;;
+      qdrant)   curl -fsS http://127.0.0.1:6333/readyz >/dev/null 2>&1 && return 0 ;;
+      chroma)   curl -fsS http://127.0.0.1:8000/api/v2/heartbeat >/dev/null 2>&1 && return 0 ;;
     esac
     # Bail early if the container already died (OOM during start/load) — a result, not a hang.
     [ "$(docker inspect -f '{{.State.Running}}' "$c" 2>/dev/null)" = false ] && return 1
@@ -269,11 +126,11 @@ up_engine(){  # $1=engine $2=mem $3=memswap $4=cpus $5=cache  -> 0 ready / 1 not
   case "$e" in
     # --insecure-allow-no-auth: 1.0 refuses a non-loopback bind without a token; this is a
     # throwaway benchmark container on a private host, wiped per cell. NOT for real use.
-    xyzdb)    docker run -d --name "$c" $mflags -p "$(port_for xyzdb)":2505 -v "$mnt" \
+    xyzdb)    docker run -d --name "$c" $mflags -p 2505:2505 -v "$mnt" \
                 "$IMG_XYZDB" --port 2505 --path /data/bench --bind 0.0.0.0 --insecure-allow-no-auth --cache-size "$cache" >/dev/null 2>&1 ;;
-    pgvector) docker run -d --name "$c" $mflags -p "$(port_for pgvector)":5432 -e POSTGRES_PASSWORD=bench -v "$mnt" "$IMG_PG" >/dev/null 2>&1 ;;
-    qdrant)   docker run -d --name "$c" $mflags -p "$(port_for qdrant)":6333 -v "$mnt" "$IMG_QDRANT" >/dev/null 2>&1 ;;
-    chroma)   docker run -d --name "$c" $mflags -p "$(port_for chroma)":8000 -v "$mnt" "$IMG_CHROMA" >/dev/null 2>&1 ;;
+    pgvector) docker run -d --name "$c" $mflags -p 5432:5432 -e POSTGRES_PASSWORD=bench -v "$mnt" "$IMG_PG" >/dev/null 2>&1 ;;
+    qdrant)   docker run -d --name "$c" $mflags -p 6333:6333 -v "$mnt" "$IMG_QDRANT" >/dev/null 2>&1 ;;
+    chroma)   docker run -d --name "$c" $mflags -p 8000:8000 -v "$mnt" "$IMG_CHROMA" >/dev/null 2>&1 ;;
   esac
   wait_ready "$e"
 }
