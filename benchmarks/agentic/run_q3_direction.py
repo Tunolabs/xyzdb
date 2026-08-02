@@ -76,7 +76,7 @@ def timed(fn, repeats, warmup=1):
     return out, statistics.median(lat)
 
 
-def run_xyz(port, lobe, field, value, k, qvecs, truths, vecs, repeats):
+def run_xyz(port, lobe, field, value, k, qvecs, truths, vecs, repeats, bucket="0"):
     from xyzdb_minimal import connect
     db = connect(adapters.DEFAULT_ENGINE_HOST, port, timeout=300.0)
     lat, rec = [], []
@@ -86,7 +86,7 @@ def run_xyz(port, lobe, field, value, k, qvecs, truths, vecs, repeats):
         # Without it xyzDB serialises ~20 KB of JSON per returned record while the
         # qdrant and pg clients hand back ids only — the first run measured that
         # serialisation and called it search latency.
-        stmt = (f'SCAN "{lobe}" WHERE bucket = "0" AND {field} = {value} '
+        stmt = (f'SCAN "{lobe}" WHERE bucket = "{bucket}" AND {field} = {value} '
                 f'| NEAREST {k} BY emb TO {qs} USING cosine | SHAPE {{id}}')
         r, ms = timed(lambda: db.execute(stmt), repeats)
         ids = [int(x["id"][1:]) for x in r.get("records", []) if "id" in x]
@@ -97,11 +97,14 @@ def run_xyz(port, lobe, field, value, k, qvecs, truths, vecs, repeats):
     return lat, rec, "gravity+satellite (exact, bounded)"
 
 
-def run_qdrant(coll, field, value, k, qvecs, truths, vecs, repeats):
+def run_qdrant(coll, field, value, k, qvecs, truths, vecs, repeats, bucket="0"):
     from qdrant_client import QdrantClient, models
     cl = QdrantClient(host=adapters.DEFAULT_ENGINE_HOST, port=6333)
-    flt = models.Filter(must=[models.FieldCondition(
-        key=field, match=models.MatchValue(value=int(value)))])
+    # Both predicates, or the bounded set is not the cell's: at coarse points the
+    # bucket is what makes gravity comparable across engines.
+    flt = models.Filter(must=[
+        models.FieldCondition(key=field, match=models.MatchValue(value=int(value))),
+        models.FieldCondition(key="bucket", match=models.MatchValue(value=str(bucket)))])
     matched = cl.count(collection_name=coll, count_filter=flt, exact=True).count
     thr = getattr(cl.get_collection(coll).config.hnsw_config,
                   "full_scan_threshold", QDRANT_FULL_SCAN_DEFAULT) or QDRANT_FULL_SCAN_DEFAULT
@@ -118,7 +121,7 @@ def run_qdrant(coll, field, value, k, qvecs, truths, vecs, repeats):
     return lat, rec, f"{mech} [{matched} pts vs threshold {thr}]"
 
 
-def run_pg(host, field, value, k, qvecs, truths, vecs, repeats, port=5432):
+def run_pg(host, field, value, k, qvecs, truths, vecs, repeats, port=5432, bucket="0"):
     """pgvector over a PERSISTENT psycopg2 connection.
 
     The first version shelled out to `docker exec … psql` once per timed repeat,
@@ -139,7 +142,7 @@ def run_pg(host, field, value, k, qvecs, truths, vecs, repeats, port=5432):
     mech = None
     for j, qv in enumerate(qvecs):
         vec = "[" + ",".join(f"{float(x):.6f}" for x in qv) + "]"
-        sql = (f"SELECT gid FROM items WHERE bucket = 0 AND {field} = {value} "
+        sql = (f"SELECT gid FROM items WHERE bucket = {int(bucket)} AND {field} = {value} "
                f"ORDER BY emb <=> %s LIMIT {k}")
 
         def call():
@@ -165,6 +168,10 @@ def run_pg(host, field, value, k, qvecs, truths, vecs, repeats, port=5432):
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--store", default="corpora/lme/axis")
+    ap.add_argument("--point", type=int, default=1,
+                    help="locality point (1=pool, 5=big_group, 50=group, 500=user)")
+    ap.add_argument("--cardinalities", default="",
+                    help="comma list; empty = every catN (the old full sweep)")
     # 0 = the whole point, matching `load_q3_point.py`'s own default. They MUST
     # agree: the oracle is computed here over the first `n` rows while the engine
     # holds whatever the loader put in, so two different defaults would score a
@@ -183,7 +190,7 @@ def main() -> None:
                     help="assert the caller left ONLY this engine running")
     args = ap.parse_args()
 
-    c = load_point(args.store, 1)          # pool: one bucket, the whole corpus
+    c = load_point(args.store, args.point)
     n = args.n or len(c["vecs"])
     vecs = np.asarray(c["vecs"][:n])
     fields = {k2: v[:n] for k2, v in c["fields"].items()}
@@ -191,24 +198,31 @@ def main() -> None:
     engines = args.engines.split(",")
     rows = []
 
-    for card in mg.CARDINALITIES:
+    cards = ([int(x) for x in args.cardinalities.split(",") if x.strip()]
+             or list(mg.CARDINALITIES))
+    for card in cards:
         field = f"cat{card}"
         rows_per_sat = n / card
         if mg.is_degenerate(n, card, args.k):
             rows.append({"axis": field, "skipped": "degenerate",
                          "rows_per_satellite": round(rows_per_sat, 1)})
             continue
-        value = int(fields[field][0])
-        sel = np.flatnonzero(fields[field] == value)
+        # At coarse points there is more than one bucket, so the cell must ask
+        # inside the bucket its query vector lives in — otherwise the bounded set is
+        # not the one grid.py computed and the cell measures a different question.
+        bucket = str(int(c["q_bucket"][0])) if "q_bucket" in c else "0"
+        in_bucket = np.flatnonzero(c["bucket_ids"][:n] == int(bucket))
+        value = int(fields[field][in_bucket[0]]) if len(in_bucket) else int(fields[field][0])
+        sel = np.array([i for i in in_bucket if fields[field][i] == value], dtype=int)
         truths = [truth_for(qv, vecs, sel, args.k) for qv in qvecs]
         for eng in engines:
             fn = {"xyzdb": lambda: run_xyz(args.xyz_port, f"mem_{field}", field, value, args.k,
-                                           qvecs, truths, vecs, args.repeats),
+                                           qvecs, truths, vecs, args.repeats, bucket),
                   "qdrant": lambda: run_qdrant("bench", field, value, args.k,
-                                               qvecs, truths, vecs, args.repeats),
+                                               qvecs, truths, vecs, args.repeats, bucket),
                   "pgvector": lambda: run_pg(adapters.DEFAULT_ENGINE_HOST, field, value,
                                              args.k, qvecs, truths, vecs,
-                                             args.repeats)}[eng]
+                                             args.repeats, bucket=bucket)}[eng]
             try:
                 lat, rec, mech = fn()
                 rows.append({
@@ -217,7 +231,8 @@ def main() -> None:
                     "engine": eng, "mechanism": mech,
                     "p50_ms": round(statistics.median(lat), 2),
                     "recall": round(float(np.mean(rec)), 4),
-                    "n": n, "queries": len(qvecs),
+                    "n": n, "queries": len(qvecs), "point": args.point,
+                    "bounded_set": int(len(sel)),
                     "direction_only": True, "engine_exclusive": args.exclusive,
                     "why": "arm64 image + 16KB pages; the publishable one is x86-64-v3",
                     "xyzdb_image": os.environ.get("XYZDB_IMG", "unset"),
