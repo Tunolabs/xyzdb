@@ -41,14 +41,49 @@ XYZ_PUT_BATCH = 600
 PG_MAINT_WORK_MEM = os.environ.get("BENCH_PG_MWM", "2GB")
 
 
+# The last partial reported by `_xyz_ids_from_json`, for the caller that wants it.
+# A module-level slot rather than a changed return type: every existing call site
+# reads a list of ids, and widening that signature would touch scenarios this
+# change has no business editing.
+LAST_PARTIAL: dict = {}
+
+
 def _xyz_ids_from_json(resp: dict) -> List[int]:
-    """Extract integer turn ids (`g<i>` -> i) from a raw xyzDB JSON response."""
+    """Extract integer turn ids (`g<i>` -> i) from a raw xyzDB JSON response.
+
+    ALSO records whether the answer was a partial. This function used to read
+    `records` and nothing else, so a `NEAREST` cut short by the latency airbag —
+    which says so, in `budget_stop`, and marks the frame `has_more` — arrived here
+    looking exactly like a complete answer. The missing rows would then have been
+    scored as MISSED RECALL: xyzDB penalised for the one thing it did right, which
+    is announcing that it stopped early.
+
+    It is the same defect the three client SDKs were just fixed for, sitting in the
+    benchmark's own extractor. A partial belongs in its own column and must never
+    be folded into a recall number — those are different facts and only one of them
+    is about search quality.
+    """
+    resp = resp or {}
+    LAST_PARTIAL.clear()
+    if resp.get("budget_stop") or resp.get("has_more"):
+        LAST_PARTIAL.update({"partial": True,
+                             "budget_stop": resp.get("budget_stop"),
+                             "has_more": bool(resp.get("has_more"))})
     out = []
-    for r in (resp or {}).get("records", []):
+    for r in resp.get("records", []):
         rid = r.get("id")
         if isinstance(rid, str) and rid.startswith("g") and rid[1:].isdigit():
             out.append(int(rid[1:]))
     return out
+
+
+def xyz_last_partial() -> dict:
+    """The partial report from the most recent `_xyz_ids_from_json`, or `{}`.
+
+    Empty means the last answer was complete — not that nobody looked, which is why
+    the caller reads this rather than inferring completeness from a row count.
+    """
+    return dict(LAST_PARTIAL)
 
 
 def _xyz_nearest(db, lobe: str, bucket_val: str, qvec, k: int) -> list:
@@ -397,10 +432,28 @@ class QdrantAdapter:
                 collection_name=self.coll, field_name="sid",
                 field_schema=models.KeywordIndexParams(type=models.KeywordIndexType.KEYWORD))
         if self._has_meta:
-            # Integer payload index on topic → filterable-HNSW applies the range filter
-            # DURING graph traversal, not as a post-filter (qdrant's strong S5 feature).
-            self.client.create_payload_index(collection_name=self.coll, field_name="topic",
-                                             field_schema=models.PayloadSchemaType.INTEGER)
+            # A payload index for EVERY declared field this run supplies, derived
+            # from the declaration instead of a hand-written list.
+            #
+            # The hand-written version indexed `bucket`, `sid` and `topic`; the
+            # `catN` fields were added later for the Q3 selectivity sweep and never
+            # reached it. The route control caught it — `field_is_indexed: False` on
+            # all four — and it is a handicap WE introduced, not one qdrant has: its
+            # filterable-HNSW needs the payload index to apply a filter inside the
+            # graph traversal. Measuring latency against an engine we quietly denied
+            # its own index is the mirror image of the strawman this benchmark
+            # refuses to build for itself.
+            #
+            # Deriving it from EXTRA_FIELDS means the next field added to the corpus
+            # cannot repeat this: a field the harness filters on is a field qdrant
+            # gets an index for, by construction.
+            _QD_SCHEMA = {int: models.PayloadSchemaType.INTEGER,
+                          float: models.PayloadSchemaType.FLOAT,
+                          str: models.PayloadSchemaType.KEYWORD}
+            for name, cast, _ in present_fields(meta):
+                self.client.create_payload_index(
+                    collection_name=self.coll, field_name=name,
+                    field_schema=_QD_SCHEMA[cast])
         qb = 250   # qdrant caps the HTTP payload at ~32MB; 250×1024d ≈ 5MB, safe
         for s in range(0, len(vecs), qb):
             pts = []
