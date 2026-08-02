@@ -18,19 +18,34 @@ pub fn execute_pipeline(engine: &Engine, steps: Vec<PipelineStep>) -> Result<Que
         return crate::ops::scan::execute_scan_aggregate(engine, scan_stmt.clone(), funcs.clone());
     }
 
-    // Special case: SCAN | NEAREST — fused V3 vector-prefix fast path. Reads
-    // only the hoisted vector prefix per record in the gravity bucket, ranks
-    // top-k, and fully deserializes only the survivors. Internally falls back
-    // to the exact scan→execute_nearest path when the prefix path can't apply,
-    // so the result is always identical to the unfused pipeline.
-    if steps.len() == 2
-        && let [
-            PipelineStep::Scan(scan_stmt),
-            PipelineStep::Nearest(nearest_stmt),
-        ] = &steps[..]
+    // Special case: SCAN | NEAREST [| …] — fused V3 vector-prefix fast path.
+    // Reads only the hoisted vector prefix per record in the gravity bucket,
+    // ranks top-k, and fully deserializes only the survivors. Internally falls
+    // back to the exact scan→execute_nearest path when the prefix path can't
+    // apply, so the result is always identical to the unfused pipeline.
+    //
+    // It fires whenever the pipeline STARTS with these two steps, not only when
+    // it is exactly these two. A longer pipeline used to fall to the generic
+    // loop below, where `SCAN` materialises one default page (1000 records) and
+    // `NEAREST` ranks within it: appending `| SHAPE {id}` — a projection, which
+    // by definition cannot change which records come back — silently turned a
+    // top-k over the whole 24,943-row bucket into a top-k over the first 1000.
+    // Measured on the benchmark corpus: five entirely different ids, `status:
+    // ok`, no flag. Any tail steps run below on the fused result.
+    if let [
+        PipelineStep::Scan(scan_stmt),
+        PipelineStep::Nearest(nearest_stmt),
+        ..,
+    ] = &steps[..]
     {
+        let (scan_stmt, nearest_stmt) = (scan_stmt.clone(), nearest_stmt.clone());
         let (records, budget_stop) =
-            crate::ops::nearest::execute_scan_nearest(engine, scan_stmt.clone(), nearest_stmt)?;
+            crate::ops::nearest::execute_scan_nearest(engine, scan_stmt, &nearest_stmt)?;
+        if steps.len() > 2 {
+            let mut steps = steps;
+            let tail = steps.split_off(2);
+            return run_steps(engine, tail, Some(records), budget_stop);
+        }
         if budget_stop.is_some() {
             // Budget cut the score-ordered hydration: `records` are the
             // highest-scoring passers found within budget — a prefix-correct
@@ -99,9 +114,42 @@ pub fn execute_pipeline(engine: &Engine, steps: Vec<PipelineStep>) -> Result<Que
         return apply_top(grouped, top, fields);
     }
 
-    let mut current_records: Option<Vec<Record>> = None;
+    run_steps(engine, steps, None, None)
+}
+
+/// Run a pipeline step by step over an optional seed of records.
+///
+/// `seed` is the output of a fused prefix that already ran (today: the fused
+/// `SCAN | NEAREST`); `budget_stop` is that prefix's airbag report, carried to
+/// the end so a partial candidate set still announces itself after the tail
+/// steps have run.
+fn run_steps(
+    engine: &Engine,
+    steps: Vec<PipelineStep>,
+    seed: Option<Vec<Record>>,
+    budget_stop: Option<xyzdb_core::result::BudgetStop>,
+) -> Result<QueryResult> {
+    let mut current_records: Option<Vec<Record>> = seed;
 
     for step in steps {
+        // A step that consumes the records and returns its own result (SET,
+        // DELETE, AGGREGATE) would swallow the airbag report, and the caller
+        // would see a mutation or a total that silently covered only the part
+        // the budget managed to score. Refuse instead: the flag has nowhere to
+        // travel on those results, so the only honest answer is to say so.
+        if budget_stop.is_some()
+            && matches!(
+                step,
+                PipelineStep::Set(_) | PipelineStep::Delete(_) | PipelineStep::Aggregate(_)
+            )
+        {
+            return Err(XyzError::InvalidQuery(
+                "NEAREST hit --nearest-budget-ms and returned a partial candidate set; \
+                 refusing to run a mutating or aggregating step over it. Narrow the scope \
+                 or raise the budget."
+                    .into(),
+            ));
+        }
         match step {
             PipelineStep::Find(f) => {
                 let result = crate::ops::find::execute_find(engine, f)?;
@@ -196,9 +244,20 @@ pub fn execute_pipeline(engine: &Engine, steps: Vec<PipelineStep>) -> Result<Que
     }
 
     // Pipeline ended with records (FIND | PULL, or just FIND)
-    match current_records {
-        Some(records) => Ok(QueryResult::Records(records)),
-        None => Ok(QueryResult::Records(vec![])),
+    match (current_records, budget_stop) {
+        // A fused prefix hit the airbag: the tail ran over a partial candidate
+        // set, so the answer still travels through the truncation channel. The
+        // tail cannot restore what the airbag never scored, and a partial that
+        // arrives looking complete is the one failure this flag exists to
+        // prevent.
+        (Some(records), Some(stop)) => Ok(QueryResult::PaginatedRecords {
+            records,
+            cursor: None,
+            has_more: true,
+            budget_stop: Some(stop),
+        }),
+        (Some(records), None) => Ok(QueryResult::Records(records)),
+        (None, _) => Ok(QueryResult::Records(vec![])),
     }
 }
 
