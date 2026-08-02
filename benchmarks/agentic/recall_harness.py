@@ -32,8 +32,41 @@ import numpy as np
 TIE_TOL = 1e-5
 
 
+def _norms(vecs: np.ndarray, chunk: int) -> np.ndarray:
+    """‖v‖ per row, same f32-product / f64-reduction discipline as the scores."""
+    n = len(vecs)
+    out = np.empty(n, dtype=np.float64)
+    for i in range(0, n, chunk):
+        blk = vecs[i:i + chunk].astype(np.float32)
+        out[i:i + chunk] = np.sqrt((blk * blk).astype(np.float64).sum(axis=1))
+    return out
+
+
 def exact_scores(q: np.ndarray, vecs: np.ndarray, chunk: int = 20_000) -> np.ndarray:
-    """Oracle cosine: f32 element-wise products, f64 reduction. Unit-norm ⇒ dot==cosine.
+    """Oracle **cosine**: f32 element-wise products, f64 reduction, divided by the norms.
+
+    FIXED 2026-08-01 — this used to return the raw dot product, justified by a
+    "unit-norm ⇒ dot == cosine" premise written into its own docstring. **That premise
+    is false for this corpus.** Measured norms run from 0.999547 to 1.000487, so dot
+    and cosine differ by up to ~5e-4 — fifty times TIE_TOL, and enough to reorder the
+    ranking rather than merely perturb a score.
+
+    It did reorder one. Query 14 at the pool point, rows g4563 and g2140:
+
+        raw dot      g2140 0.5508422 > g4563 0.5507662
+        true cosine  g4563 0.5508728 > g2140 0.5508013
+
+    The engine ranked g4563 first and the old oracle ranked g2140 first, so the
+    equivalence gate reported the ENGINE as wrong. The engine was right: `USING
+    cosine` reaches `distance::cosine_pruned`, which divides by ‖a‖ and ‖b‖ and
+    assumes nothing about them.
+
+    This was a pre-existing defect, not one this axis introduced — `measure_s5.py`
+    and `measure_sizesweep.py` have been taking their cutoffs from it. Every engine
+    was scored against the same wrong truth, so the comparison stayed self-consistent
+    and nothing looked amiss. That is the third time in this session a bug hid by
+    being uniformly applied.
+
 
     Scored in row chunks. The products are materialised before the reduction, so a
     single call over the pooled corpus (246,738 x 1024) would allocate ~1 GB of f32
@@ -53,13 +86,15 @@ def exact_scores(q: np.ndarray, vecs: np.ndarray, chunk: int = 20_000) -> np.nda
         (n,) f64 scores, one per row.
     """
     q32 = q.astype(np.float32)
+    nq = float(np.sqrt((q32 * q32).astype(np.float64).sum()))
     n = len(vecs)
-    if n <= chunk:
-        return (vecs.astype(np.float32) * q32).astype(np.float64).sum(axis=1)
     out = np.empty(n, dtype=np.float64)
     for i in range(0, n, chunk):
         blk = vecs[i:i + chunk].astype(np.float32)
         out[i:i + chunk] = (blk * q32).astype(np.float64).sum(axis=1)
+    nv = _norms(vecs, chunk)
+    denom = nv * nq
+    np.divide(out, denom, out=out, where=denom > 0)
     return out
 
 

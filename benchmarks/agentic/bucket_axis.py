@@ -276,6 +276,16 @@ def build_store(outdir: str, k: int = 10, limit: int = 0) -> dict:
         # runs claim the same corpus while carrying different structured fields.
         "meta_sha256": {name: _sha_file(os.path.join(meta_dir, f"{name}.npy"))
                         for name in sorted(md)},
+        # The oracles are DERIVED, and hashing only their inputs is not enough: the
+        # scorer is an input too. Fixing `exact_scores` to compute true cosine changed
+        # every oracle in this store while vecs_sha256 and every metadata hash stayed
+        # byte-identical — two stores claiming the same seal with different truths,
+        # which is the exact failure the metadata hashes were added to prevent, one
+        # level down.
+        "oracle_sha256": {str(nb): _sha_file(os.path.join(outdir, f"oracle_b{nb}.npy"))
+                          for nb in AXIS_POINTS},
+        "scorer": "cosine = f32 products, f64 reduction, divided by both norms "
+                  "(recall_harness.exact_scores); NOT raw dot — this corpus is not unit-norm",
         "axis": "locality granularity — tenant isolation vs shared pool",
         "points": points,
         "oracle_portable": (

@@ -106,17 +106,34 @@ class XyzdbAdapter:
     envelope. Ghosts OFF (verified: SHOW GHOSTS empty after NEAREST-per-bucket). No dial."""
     name = "xyzdb"
 
-    def __init__(self, host="127.0.0.1", port=2505, dim=1024, scoped=True, **_):
+    def __init__(self, host="127.0.0.1", port=2505, dim=1024, scoped=True,
+                 satellite=None, lobe="mem", **_):
         import xyzdb_minimal as xyzdb
-        self.db = xyzdb.connect(host, port)
-        self.lobe = "mem"
+        self.db = xyzdb.connect(host, port, timeout=300.0)
+        # Named so the equivalence gate can hold the same rows twice — once with the
+        # axis declared and once without — and compare the two routes over the wire.
+        self.lobe = lobe
+        # The satellite axis is a CELL PARAMETER, not a property of the adapter.
+        # `SATELLITE BY` is refused on a non-empty lobe and cannot be changed
+        # afterwards, so each (granularity, axis) pair is its own load: Q3-scoped
+        # wants gravity=tenant with axis=catN, Q3-pool wants gravity=pool with the
+        # tenant residual, and the multi-tenant result wants gravity=group with
+        # axis=TENANT. Hardwiring it here would silently make one of those
+        # impossible. Thirteen distinct loads at 246,738 rows each — worth counting
+        # before launching rather than discovering mid-matrix.
+        self.satellite = satellite
 
     def load(self, vecs, bids, hnsw=None, sids=None, meta=None):
         # DDL via execute() — the minimal client has no typed create_lobe/create_vector/
-        # gravity_by helpers; these three statements are their exact equivalent.
+        # gravity_by helpers; these statements are their exact equivalent.
         self.db.execute(f'LOBE "{self.lobe}" HINT="agentic"')
         self.db.execute(f'VECTOR emb IN "{self.lobe}"')
         self.db.execute(f'GRAVITY BY bucket IN "{self.lobe}"')
+        if self.satellite:
+            # Declared BEFORE the first write: the engine refuses it on a non-empty
+            # lobe, because existing rows would stay at satellite 0 where a bounded
+            # query cannot reach them.
+            self.db.execute(f'SATELLITE BY {self.satellite} IN "{self.lobe}"')
         for s in range(0, len(vecs), XYZ_PUT_BATCH):
             recs = []
             for i in range(s, min(s + XYZ_PUT_BATCH, len(vecs))):
@@ -127,9 +144,19 @@ class XyzdbAdapter:
                     r[name] = cast(meta[name][i])
                 recs.append(r)
             self.db.put_batch(self.lobe, recs)
-        # Operational cost of scoping (the moat): xyzDB scopes by DECLARING gravity.
-        self.setup_cost = {"kind": "gravity-declared", "structures": 1, "ddl_lines": 1,
-                           "note": "1 GRAVITY BY declaration; scope co-location is free"}
+        # Operational cost of scoping (the moat): xyzDB scopes by DECLARING it.
+        # The count moves with the satellite so it stays honest — one line without an
+        # axis, two with. Two lines against pg's 50,000 statements and 145.7s for the
+        # same effect (see the P6 viability result); a stale `1` would be flattering
+        # by inertia rather than by measurement.
+        if self.satellite:
+            self.setup_cost = {
+                "kind": "gravity+satellite-declared", "structures": 1, "ddl_lines": 2,
+                "note": f"GRAVITY BY bucket + SATELLITE BY {self.satellite}; "
+                        "co-location and sub-bucketing are declarations, not structures"}
+        else:
+            self.setup_cost = {"kind": "gravity-declared", "structures": 1, "ddl_lines": 1,
+                               "note": "1 GRAVITY BY declaration; scope co-location is free"}
 
     def query(self, qvec, bucket, k) -> List[int]:
         recs = _xyz_nearest(self.db, self.lobe, str(bucket), qvec, k)
