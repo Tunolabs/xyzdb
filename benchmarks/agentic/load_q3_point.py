@@ -71,7 +71,15 @@ def main() -> None:
 
     cls = {"xyzdb": adapters.XyzdbAdapter, "qdrant": adapters.QdrantAdapter,
            "pgvector": adapters.PgvectorAdapter, "chroma": adapters.ChromaAdapter}[args.engine]
-    kw = {"host": args.host, "dim": vecs.shape[1]}
+    # `scoped=True` is each rival's CO-LOCATED strong form: pg partitions by bucket,
+    # qdrant makes bucket a tenant key, chroma a collection per bucket. The default
+    # is False, and not passing it measured pg's FLAT arm — a global HNSW with a
+    # post-filter — while the row was labelled as the partitioned one. The signature
+    # was in the output and read as decoration: 0.6 ms flat across a 50x range of
+    # bounded set, and recall collapsing from 0.99 at 50% selectivity to 0.065 at 1%,
+    # which is what a post-filter does when the filter gets selective. xyzDB is
+    # `scoped` by construction (gravity IS the declaration), so it takes the default.
+    kw = {"host": args.host, "dim": vecs.shape[1], "scoped": args.engine != "xyzdb"}
     if args.port:
         kw["port"] = args.port
 

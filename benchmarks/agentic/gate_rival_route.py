@@ -120,7 +120,7 @@ def main() -> None:
     ap.add_argument("--engine", required=True, choices=["qdrant", "pgvector", "chroma"])
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=6333)
-    ap.add_argument("--collection", default="bench")
+    ap.add_argument("--collection", default="mem")  # what QdrantAdapter creates
     ap.add_argument("--container", default="bench-pg")
     ap.add_argument("--table", default="items")
     ap.add_argument("--bucket", default="0")

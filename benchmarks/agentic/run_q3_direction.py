@@ -51,6 +51,11 @@ import recall_harness as rh        # noqa: E402
 from bucket_axis import load_point  # noqa: E402
 
 QDRANT_FULL_SCAN_DEFAULT = 10_000
+# The collection `adapters.QdrantAdapter` actually creates. It was hardcoded to
+# "bench" here and in the route gate, so every qdrant cell died on a 404 that read
+# as "qdrant is down". When a default is wrong in one place, the same name is worth
+# grepping for across the harness before closing it — this is the second copy.
+QDRANT_COLLECTION = os.environ.get("BENCH_QDRANT_COLLECTION", "mem")
 
 
 def truth_for(qvec, vecs, rows, k):
@@ -218,7 +223,7 @@ def main() -> None:
         for eng in engines:
             fn = {"xyzdb": lambda: run_xyz(args.xyz_port, f"mem_{field}", field, value, args.k,
                                            qvecs, truths, vecs, args.repeats, bucket),
-                  "qdrant": lambda: run_qdrant("bench", field, value, args.k,
+                  "qdrant": lambda: run_qdrant(QDRANT_COLLECTION, field, value, args.k,
                                                qvecs, truths, vecs, args.repeats, bucket),
                   "pgvector": lambda: run_pg(adapters.DEFAULT_ENGINE_HOST, field, value,
                                              args.k, qvecs, truths, vecs,
