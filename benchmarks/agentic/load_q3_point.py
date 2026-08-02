@@ -22,17 +22,22 @@ finding, not an accident, and it is what `setup_cost` records.
 """
 import argparse
 import json
+import os
 import sys
 import time
 
 import numpy as np
 
-sys.path.insert(0, "/Applications/Projects/Tunolabs/xyz/xyzdb/examples/client/python")
-sys.path.insert(0, "/Applications/Projects/Tunolabs/xyz/xyzdb/benchmarks/agentic")
+_HERE = os.path.dirname(os.path.abspath(__file__))
+for _p in ("/bench", "/client", _HERE,
+           os.path.join(_HERE, "..", "..", "examples", "client", "python")):
+    if os.path.isdir(_p) and _p not in sys.path:
+        sys.path.insert(0, _p)
 
 import adapters  # noqa: E402
 import metadata_gen as mg  # noqa: E402
 from bucket_axis import load_point  # noqa: E402
+from measure_x import hnsw_from_env  # noqa: E402
 
 
 def main() -> None:
@@ -42,7 +47,10 @@ def main() -> None:
     ap.add_argument("--store", default="corpora/lme/axis")
     ap.add_argument("--point", type=int, default=1, help="users per bucket (1 = pool)")
     ap.add_argument("--n", type=int, default=0, help="rows to load; 0 = all")
-    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--host", default=os.environ.get("BENCH_ENGINE_HOST", "127.0.0.1"),
+                    help="engine host; inside the bench image this MUST come from\n"
+                         "BENCH_ENGINE_HOST — 127.0.0.1 there is the container itself,\n"
+                         "which refuses connections exactly like a dead engine")
     ap.add_argument("--port", type=int, default=0, help="0 = the engine's default port")
     ap.add_argument("--out", default="")
     args = ap.parse_args()
@@ -52,6 +60,14 @@ def main() -> None:
     vecs = np.asarray(c["vecs"][:n])
     bids = c["bucket_ids"][:n]
     meta = {k: v[:n] for k, v in c["fields"].items()}
+
+    # The effective endpoint, on the record. A cell that pointed at the wrong
+    # address is otherwise indistinguishable from one that pointed at the right
+    # one — and inside a container 127.0.0.1 is the container itself, which
+    # answers "connection refused" exactly like a dead engine.
+    print(json.dumps({"endpoint": f"{args.host}:{args.port or 'default'}",
+                      "engine_host_env": os.environ.get("BENCH_ENGINE_HOST"),
+                      "port_offset": adapters.PORT_OFFSET}), flush=True)
 
     cls = {"xyzdb": adapters.XyzdbAdapter, "qdrant": adapters.QdrantAdapter,
            "pgvector": adapters.PgvectorAdapter, "chroma": adapters.ChromaAdapter}[args.engine]
@@ -78,7 +94,11 @@ def main() -> None:
         # One load; every catN travels as an ordinary payload/column field.
         t0 = time.perf_counter()
         a = cls(**kw)
-        a.load(vecs, bids, hnsw=None, meta=meta)
+        # The rivals' index config is a CELL PARAMETER, read from the same env the
+        # rest of the matrix uses. Passing None here is not "the default": the
+        # qdrant adapter dereferences it and dies, and pg/chroma would silently get
+        # a different graph from every other scenario.
+        a.load(vecs, bids, hnsw=hnsw_from_env(args.engine), meta=meta)
         dt = time.perf_counter() - t0
         a.close()
         rows.append({"engine": args.engine, "rows": int(n), "load_s": round(dt, 1),

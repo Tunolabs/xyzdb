@@ -97,8 +97,12 @@ require_containerised_engine(){   # $1=engine
         echo "       not the artefact under test and carries none of the cell's limits." >&2
         return 1
     fi
-    docker port "$c" "$port" >/dev/null 2>&1 || {
-        echo "FATAL: container '$c' does not publish port $port." >&2
+    # `docker port` is asked about the CONTAINER's port and answers with the host
+    # binding — passing the host port here asked a question the daemon cannot
+    # answer and read as "not published" on every offset run.
+    local cport; cport=$(container_port_for "$e")
+    docker port "$c" "$cport" >/dev/null 2>&1 || {
+        echo "FATAL: container '$c' does not publish container port $cport (host $port)." >&2
         return 1
     }
 }
@@ -121,13 +125,22 @@ bench_build(){
         echo "FATAL: could not build $BENCH_IMG" >&2; return 1; }
 }
 
+# Where a step's `--out` should point. The container has its own /tmp, so an
+# `--out /tmp/x.jsonl` writes INSIDE it and vanishes with the container — the first
+# sweep lost its whole JSONL that way and survived only because run_step had
+# captured stdout. Results go to a mounted directory or they are not results.
+BENCH_OUT="${BENCH_OUT:-$BENCH_DIR/results/local}"
+
 bench_py(){   # $1=script (repo-relative to benchmarks/agentic), rest=args
     local repo; repo=$(cd "$BENCH_DIR/../.." && pwd)
+    mkdir -p "$BENCH_OUT"
     docker run --rm \
+        -v "$BENCH_OUT":/out \
         --add-host=host.docker.internal:host-gateway \
         -v "$BENCH_DIR":/bench \
         -v "$repo/examples/client/python":/client:ro \
         -e BENCH_ENGINE_HOST=host.docker.internal \
+        -e BENCH_PORT_OFFSET="$BENCH_PORT_OFFSET" \
         -e XYZDB_IMG="${XYZDB_IMG:-}" \
         -w /bench \
         "$BENCH_IMG" "$@"
@@ -154,7 +167,20 @@ run_step(){   # $1=logfile, rest=command -> the command's own exit code
     return $REAL_EXIT
 }
 
-port_for(){ case "$1" in xyzdb) echo 2505;; pgvector) echo 5432;; qdrant) echo 6333;; chroma) echo 8000;; esac; }
+# HOST-side port for an engine. The container always listens on its own standard
+# port; only the published host port moves.
+#
+# BENCH_PORT_OFFSET exists because a development machine is not a bench box: this
+# one already runs a project postgres on 5432, and `up_engine` died with "port is
+# already allocated" — a failure that looks like the engine crashing until you read
+# the daemon's message. Shifting the harness is the right way round; stopping
+# somebody's database to run a benchmark is not.
+#
+# It must stay in ONE place: the shell publishes the port and the Python adapters
+# connect to it, so the two read the same env var or they silently disagree.
+BENCH_PORT_OFFSET="${BENCH_PORT_OFFSET:-0}"
+container_port_for(){ case "$1" in xyzdb) echo 2505;; pgvector) echo 5432;; qdrant) echo 6333;; chroma) echo 8000;; esac; }
+port_for(){ echo $(( $(container_port_for "$1") + BENCH_PORT_OFFSET )); }
 datadir_for(){ case "$1" in xyzdb|chroma) echo /data;; pgvector) echo /var/lib/postgresql;; qdrant) echo /qdrant/storage;; esac; }
 # Where measure_*.py should `du` the on-disk footprint: bind path (AWS) or named volume (Mac).
 diskarg_for(){ if [ -n "${STORAGE_ROOT:-}" ]; then echo "--disk_path $STORAGE_ROOT/$1"; else echo "--volume bench_$1"; fi; }
@@ -214,13 +240,13 @@ preserve_forensics(){
 }
 
 wait_ready(){  # $1=engine -> 0 ready / 1 died or timeout
-  local e=$1 c=bench-$1 i=0 py="${PY:-python3}"
+  local e=$1 c=bench-$1 i=0 py="${PY:-python3}" hp; hp=$(port_for "$e")
   while [ $i -lt 90 ]; do
     case "$e" in
-      xyzdb)    nc -z 127.0.0.1 2505 2>/dev/null && return 0 ;;
-      pgvector) "$py" -c "import psycopg2;psycopg2.connect(host='127.0.0.1',port=5432,user='postgres',password='bench',dbname='postgres').close()" 2>/dev/null && return 0 ;;
-      qdrant)   curl -fsS http://127.0.0.1:6333/readyz >/dev/null 2>&1 && return 0 ;;
-      chroma)   curl -fsS http://127.0.0.1:8000/api/v2/heartbeat >/dev/null 2>&1 && return 0 ;;
+      xyzdb)    nc -z 127.0.0.1 "$hp" 2>/dev/null && return 0 ;;
+      pgvector) "$py" -c "import psycopg2,sys;psycopg2.connect(host='127.0.0.1',port=int(sys.argv[1]),user='postgres',password='bench',dbname='postgres').close()" "$hp" 2>/dev/null && return 0 ;;
+      qdrant)   curl -fsS "http://127.0.0.1:$hp/readyz" >/dev/null 2>&1 && return 0 ;;
+      chroma)   curl -fsS "http://127.0.0.1:$hp/api/v2/heartbeat" >/dev/null 2>&1 && return 0 ;;
     esac
     # Bail early if the container already died (OOM during start/load) — a result, not a hang.
     [ "$(docker inspect -f '{{.State.Running}}' "$c" 2>/dev/null)" = false ] && return 1
@@ -243,11 +269,11 @@ up_engine(){  # $1=engine $2=mem $3=memswap $4=cpus $5=cache  -> 0 ready / 1 not
   case "$e" in
     # --insecure-allow-no-auth: 1.0 refuses a non-loopback bind without a token; this is a
     # throwaway benchmark container on a private host, wiped per cell. NOT for real use.
-    xyzdb)    docker run -d --name "$c" $mflags -p 2505:2505 -v "$mnt" \
+    xyzdb)    docker run -d --name "$c" $mflags -p "$(port_for xyzdb)":2505 -v "$mnt" \
                 "$IMG_XYZDB" --port 2505 --path /data/bench --bind 0.0.0.0 --insecure-allow-no-auth --cache-size "$cache" >/dev/null 2>&1 ;;
-    pgvector) docker run -d --name "$c" $mflags -p 5432:5432 -e POSTGRES_PASSWORD=bench -v "$mnt" "$IMG_PG" >/dev/null 2>&1 ;;
-    qdrant)   docker run -d --name "$c" $mflags -p 6333:6333 -v "$mnt" "$IMG_QDRANT" >/dev/null 2>&1 ;;
-    chroma)   docker run -d --name "$c" $mflags -p 8000:8000 -v "$mnt" "$IMG_CHROMA" >/dev/null 2>&1 ;;
+    pgvector) docker run -d --name "$c" $mflags -p "$(port_for pgvector)":5432 -e POSTGRES_PASSWORD=bench -v "$mnt" "$IMG_PG" >/dev/null 2>&1 ;;
+    qdrant)   docker run -d --name "$c" $mflags -p "$(port_for qdrant)":6333 -v "$mnt" "$IMG_QDRANT" >/dev/null 2>&1 ;;
+    chroma)   docker run -d --name "$c" $mflags -p "$(port_for chroma)":8000 -v "$mnt" "$IMG_CHROMA" >/dev/null 2>&1 ;;
   esac
   wait_ready "$e"
 }

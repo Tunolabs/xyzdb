@@ -39,8 +39,11 @@ import time
 
 import numpy as np
 
-sys.path.insert(0, "/Applications/Projects/Tunolabs/xyz/xyzdb/examples/client/python")
-sys.path.insert(0, "/Applications/Projects/Tunolabs/xyz/xyzdb/benchmarks/agentic")
+_HERE = os.path.dirname(os.path.abspath(__file__))
+for _p in ("/bench", "/client", _HERE,
+           os.path.join(_HERE, "..", "..", "examples", "client", "python")):
+    if os.path.isdir(_p) and _p not in sys.path:
+        sys.path.insert(0, _p)
 
 import adapters                    # noqa: E402
 import metadata_gen as mg          # noqa: E402

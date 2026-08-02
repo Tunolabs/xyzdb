@@ -20,6 +20,12 @@ from typing import List
 # through every call site — the address is a property of where the harness runs,
 # not of any single measurement.
 DEFAULT_ENGINE_HOST = os.environ.get("BENCH_ENGINE_HOST", "127.0.0.1")
+
+# Added to every engine's standard port. The containers always listen on their own
+# ports; only the published host port moves, because a development machine may
+# already be using one (this one runs a project postgres on 5432). Read from the
+# same env var `lib_docker.sh` publishes with, so shell and Python cannot disagree.
+PORT_OFFSET = int(os.environ.get("BENCH_PORT_OFFSET", "0"))
 import numpy as np
 
 BATCH = 2000
@@ -114,7 +120,7 @@ class XyzdbAdapter:
     envelope. Ghosts OFF (verified: SHOW GHOSTS empty after NEAREST-per-bucket). No dial."""
     name = "xyzdb"
 
-    def __init__(self, host=DEFAULT_ENGINE_HOST, port=2505, dim=1024, scoped=True,
+    def __init__(self, host=DEFAULT_ENGINE_HOST, port=2505 + PORT_OFFSET, dim=1024, scoped=True,
                  satellite=None, lobe="mem", **_):
         import xyzdb_minimal as xyzdb
         self.db = xyzdb.connect(host, port, timeout=300.0)
@@ -213,7 +219,7 @@ class XyzdbAdapter:
 class PgvectorAdapter:
     name = "pgvector"
 
-    def __init__(self, host=DEFAULT_ENGINE_HOST, port=5432, dim=1024, hnsw=None, scoped=False, **_):
+    def __init__(self, host=DEFAULT_ENGINE_HOST, port=5432 + PORT_OFFSET, dim=1024, hnsw=None, scoped=False, **_):
         import psycopg2
         from pgvector.psycopg2 import register_vector
         self.dim, self.scoped = dim, scoped
@@ -353,7 +359,7 @@ class PgvectorAdapter:
 class QdrantAdapter:
     name = "qdrant"
 
-    def __init__(self, host=DEFAULT_ENGINE_HOST, port=6333, dim=1024, hnsw=None, scoped=False,
+    def __init__(self, host=DEFAULT_ENGINE_HOST, port=6333 + PORT_OFFSET, dim=1024, hnsw=None, scoped=False,
                  s1_variant="scroll", **_):
         from qdrant_client import QdrantClient
         self.dim, self.scoped = dim, scoped
@@ -488,7 +494,7 @@ class QdrantAdapter:
 class ChromaAdapter:
     name = "chroma"
 
-    def __init__(self, host=DEFAULT_ENGINE_HOST, port=8000, dim=1024, hnsw=None, scoped=False, **_):
+    def __init__(self, host=DEFAULT_ENGINE_HOST, port=8000 + PORT_OFFSET, dim=1024, hnsw=None, scoped=False, **_):
         import chromadb
         self.client = chromadb.HttpClient(host=host, port=port)
         self.dim, self.scoped = dim, scoped
