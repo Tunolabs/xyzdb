@@ -655,17 +655,14 @@ impl Engine {
         // unfiltered, then walker-filter and truncate: the "OR => scan" contract,
         // symmetric with Engine::resolve_find_expr.
         let records = match &stmt.filter_expr {
-            None => {
-                self.ghost_manager
-                    .read_topn(
-                        &stmt.name,
-                        limit,
-                        &[],
-                        &self.turba.spatial,
-                        &self.turba.vectors,
-                        fd,
-                    )?
-            }
+            None => self.ghost_manager.read_topn(
+                &stmt.name,
+                limit,
+                &[],
+                &self.turba.spatial,
+                &self.turba.vectors,
+                fd,
+            )?,
             Some(expr) => match expr.as_flat_and() {
                 Some(flat) => {
                     let flat: Vec<xytalk_parser::ast::Filter> = flat.into_iter().cloned().collect();
@@ -682,13 +679,13 @@ impl Engine {
                     let core = crate::ops::to_core_expr(expr);
                     self.ghost_manager
                         .read_topn(
-                        &stmt.name,
-                        usize::MAX,
-                        &[],
-                        &self.turba.spatial,
-                        &self.turba.vectors,
-                        fd,
-                    )?
+                            &stmt.name,
+                            usize::MAX,
+                            &[],
+                            &self.turba.spatial,
+                            &self.turba.vectors,
+                            fd,
+                        )?
                         .into_iter()
                         .filter(|r| crate::ops::matches_core_expr(r, &core))
                         .take(limit)

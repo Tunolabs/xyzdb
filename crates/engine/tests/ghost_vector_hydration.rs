@@ -20,7 +20,9 @@ use xyzdb_engine::engine::{Engine, QueryResult};
 const DIM: usize = 64;
 
 fn exec(engine: &Engine, s: &str) -> QueryResult {
-    engine.run(s).unwrap_or_else(|e| panic!("exec {s:?}: {e:?}"))
+    engine
+        .run(s)
+        .unwrap_or_else(|e| panic!("exec {s:?}: {e:?}"))
 }
 
 fn records(qr: QueryResult) -> Vec<xyzdb_core::record::Record> {
@@ -91,7 +93,8 @@ fn ghost_routed_scan_returns_the_declared_vector() {
     );
     let missing = after.iter().filter(|r| emb_len(r).is_none()).count();
     assert_eq!(
-        missing, 0,
+        missing,
+        0,
         "{missing}/{} ghost-routed records lost the declared vector — a ghost \
          is an accelerator, not a different answer",
         after.len()
@@ -125,7 +128,9 @@ fn unfused_nearest_over_a_ghost_routed_scan_still_ranks() {
 
     let ranked = records(exec(
         &e,
-        &format!(r#"SCAN "g" WHERE tag="t" | NEAREST 5 BY emb TO [{q}] USING cosine | SHAPE {{id}}"#),
+        &format!(
+            r#"SCAN "g" WHERE tag="t" | NEAREST 5 BY emb TO [{q}] USING cosine | SHAPE {{id}}"#
+        ),
     ));
     assert_eq!(
         ranked.len(),

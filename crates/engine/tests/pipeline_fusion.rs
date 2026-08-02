@@ -16,7 +16,9 @@ use xyzdb_engine::engine::{Engine, QueryResult};
 const DIM: usize = 64;
 
 fn exec(engine: &Engine, s: &str) -> QueryResult {
-    engine.run(s).unwrap_or_else(|e| panic!("exec {s:?}: {e:?}"))
+    engine
+        .run(s)
+        .unwrap_or_else(|e| panic!("exec {s:?}: {e:?}"))
 }
 
 fn records(qr: QueryResult) -> Vec<xyzdb_core::record::Record> {
@@ -171,7 +173,9 @@ fn aggregate_after_nearest_folds_the_true_top_k() {
 
     let agg = exec(
         &e,
-        &format!(r#"SCAN "v" WHERE bucket = "0" | NEAREST 10 BY emb TO [{q}] USING cosine | AGGREGATE max(x)"#),
+        &format!(
+            r#"SCAN "v" WHERE bucket = "0" | NEAREST 10 BY emb TO [{q}] USING cosine | AGGREGATE max(x)"#
+        ),
     );
     let max = match &agg {
         QueryResult::Aggregation(m) => m.values().next().cloned(),
@@ -203,7 +207,9 @@ fn take_after_nearest_truncates_the_true_top_k() {
 
     let ids: Vec<String> = records(exec(
         &e,
-        &format!(r#"SCAN "v" WHERE bucket = "0" | NEAREST 10 BY emb TO [{q}] USING cosine | TAKE 3"#),
+        &format!(
+            r#"SCAN "v" WHERE bucket = "0" | NEAREST 10 BY emb TO [{q}] USING cosine | TAKE 3"#
+        ),
     ))
     .iter()
     .map(|r| match r.fields.get("id") {
@@ -275,9 +281,14 @@ fn set_after_nearest_writes_the_true_top_k() {
 
     exec(
         &e,
-        &format!(r#"SCAN "v" WHERE bucket = "0" | NEAREST 3 BY emb TO [{q}] USING cosine | SET tagged = "yes""#),
+        &format!(
+            r#"SCAN "v" WHERE bucket = "0" | NEAREST 3 BY emb TO [{q}] USING cosine | SET tagged = "yes""#
+        ),
     );
-    let tagged = records(exec(&e, r#"SCAN "v" WHERE bucket = "0" AND tagged = "yes" LIMIT 100"#));
+    let tagged = records(exec(
+        &e,
+        r#"SCAN "v" WHERE bucket = "0" AND tagged = "yes" LIMIT 100"#,
+    ));
     let mut ids: Vec<String> = tagged
         .iter()
         .filter_map(|r| match r.fields.get("id") {
@@ -306,18 +317,26 @@ fn delete_after_nearest_removes_the_true_top_k() {
 
     exec(
         &e,
-        &format!(r#"SCAN "v" WHERE bucket = "0" | NEAREST 3 BY emb TO [{q}] USING cosine | DELETE"#),
+        &format!(
+            r#"SCAN "v" WHERE bucket = "0" | NEAREST 3 BY emb TO [{q}] USING cosine | DELETE"#
+        ),
     );
     for gone in [N - 1, N - 2, N - 3] {
         let hit = records(exec(
             &e,
             &format!(r#"SCAN "v" WHERE bucket = "0" AND id = "g{gone}" LIMIT 5"#),
         ));
-        assert!(hit.is_empty(), "g{gone} was in the fused top-3 and must be gone");
+        assert!(
+            hit.is_empty(),
+            "g{gone} was in the fused top-3 and must be gone"
+        );
     }
     let survivor = records(exec(
         &e,
-        &format!(r#"SCAN "v" WHERE bucket = "0" AND id = "g{}" LIMIT 5"#, N - 4),
+        &format!(
+            r#"SCAN "v" WHERE bucket = "0" AND id = "g{}" LIMIT 5"#,
+            N - 4
+        ),
     ));
     assert_eq!(
         survivor.len(),

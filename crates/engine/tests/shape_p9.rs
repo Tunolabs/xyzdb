@@ -161,13 +161,17 @@ fn shape_after_nearest_projects_and_keeps_rows() {
 
     let plain = records(exec(
         &e,
-        &format!(r#"SCAN "v" WHERE bucket = "0" AND cat2 = 1 | NEAREST 2 BY emb TO [{q}] USING cosine"#),
+        &format!(
+            r#"SCAN "v" WHERE bucket = "0" AND cat2 = 1 | NEAREST 2 BY emb TO [{q}] USING cosine"#
+        ),
     ));
     assert_eq!(plain.len(), 2, "control: NEAREST alone returns its top-2");
 
     let shaped = records(exec(
         &e,
-        &format!(r#"SCAN "v" WHERE bucket = "0" AND cat2 = 1 | NEAREST 2 BY emb TO [{q}] USING cosine | SHAPE {{k}}"#),
+        &format!(
+            r#"SCAN "v" WHERE bucket = "0" AND cat2 = 1 | NEAREST 2 BY emb TO [{q}] USING cosine | SHAPE {{k}}"#
+        ),
     ));
     assert_eq!(
         shaped.len(),
