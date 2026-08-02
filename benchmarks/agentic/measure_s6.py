@@ -91,7 +91,7 @@ def main():
         "aggregate_ms": round(agg_ms, 3),   # xyz ghost-routed -> sub-ms
         "vec_disk_mb": vec_disk, "store_disk_mb": store_disk, "total_disk_mb": total_disk,
         "load_s": round(load_s, 1), "settle_ms": round(settle_ms, 1), "status": None,
-        "stamp": bench_stamp(),
+        "stamp": bench_stamp(adapter),
     }
     open(args.out, "a").write(json.dumps(rec) + "\n")
     print(json.dumps(rec))

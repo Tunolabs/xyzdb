@@ -73,7 +73,7 @@ def main():
         st = "unviable_build_timeout" if isinstance(e, TimeoutError) else "crash_or_oom_during_load"
         rec = {"kind": "s2", "engine": args.engine, "envelope": args.envelope, "round": args.round,
                "status": st, "oom_at_s": at, "build_ram_peak_mb": round(bpeak, 1),
-               "err": str(e)[:120], "stamp": bench_stamp()}
+               "err": str(e)[:120], "stamp": bench_stamp(adapter)}
         open(args.out, "a").write(json.dumps(rec) + "\n"); print(json.dumps(rec)); return
 
     # Post-load settle to state parity (change 3): restart+reconnect so the BASE index
@@ -83,7 +83,7 @@ def main():
         settle_ms = settle(args.container, args.engine, args.host, port, adapter)
     except Exception as e:
         rec = {"kind": "s2", "engine": args.engine, "envelope": args.envelope, "round": args.round,
-               "status": "settle_failed", "err": str(e)[:120], "stamp": bench_stamp()}
+               "status": "settle_failed", "err": str(e)[:120], "stamp": bench_stamp(adapter)}
         open(args.out, "a").write(json.dumps(rec) + "\n"); print(json.dumps(rec)); return
 
     rng = np.random.default_rng(20260701)
@@ -135,7 +135,7 @@ def main():
         "disk_total_mb": disk_mb(args.volume, args.disk_path), "load_s": round(load_s, 1),
         "settle_ms": round(settle_ms, 1),
         "maint_signal": "not-wired (fleco 6.2); windows expose degradation", "status": None,
-        "stamp": bench_stamp(),
+        "stamp": bench_stamp(adapter),
     }
     open(args.out, "a").write(json.dumps(rec) + "\n")
     print(json.dumps(rec))

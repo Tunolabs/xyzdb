@@ -34,7 +34,6 @@ import argparse
 import json
 import os
 import statistics
-import subprocess
 import sys
 import time
 
@@ -43,6 +42,7 @@ import numpy as np
 sys.path.insert(0, "/Applications/Projects/Tunolabs/xyz/xyzdb/examples/client/python")
 sys.path.insert(0, "/Applications/Projects/Tunolabs/xyz/xyzdb/benchmarks/agentic")
 
+import adapters                    # noqa: E402
 import metadata_gen as mg          # noqa: E402
 import recall_harness as rh        # noqa: E402
 from bucket_axis import load_point  # noqa: E402
@@ -75,7 +75,7 @@ def timed(fn, repeats, warmup=1):
 
 def run_xyz(port, lobe, field, value, k, qvecs, truths, vecs, repeats):
     from xyzdb_minimal import connect
-    db = connect("127.0.0.1", port, timeout=300.0)
+    db = connect(adapters.DEFAULT_ENGINE_HOST, port, timeout=300.0)
     lat, rec = [], []
     for j, qv in enumerate(qvecs):
         qs = json.dumps([float(x) for x in qv])
@@ -96,7 +96,7 @@ def run_xyz(port, lobe, field, value, k, qvecs, truths, vecs, repeats):
 
 def run_qdrant(coll, field, value, k, qvecs, truths, vecs, repeats):
     from qdrant_client import QdrantClient, models
-    cl = QdrantClient(host="127.0.0.1", port=6333)
+    cl = QdrantClient(host=adapters.DEFAULT_ENGINE_HOST, port=6333)
     flt = models.Filter(must=[models.FieldCondition(
         key=field, match=models.MatchValue(value=int(value)))])
     matched = cl.count(collection_name=coll, count_filter=flt, exact=True).count
@@ -115,32 +115,47 @@ def run_qdrant(coll, field, value, k, qvecs, truths, vecs, repeats):
     return lat, rec, f"{mech} [{matched} pts vs threshold {thr}]"
 
 
-def run_pg(container, field, value, k, qvecs, truths, vecs, repeats, dim):
+def run_pg(host, field, value, k, qvecs, truths, vecs, repeats, port=5432):
+    """pgvector over a PERSISTENT psycopg2 connection.
+
+    The first version shelled out to `docker exec … psql` once per timed repeat,
+    so every measurement included spawning a container exec and a fresh psql
+    process — tens of milliseconds of process startup reported as query latency,
+    against rivals measured over a connection that was already open. The warmup
+    discard did not help: the cost was paid on every repeat, not just the first.
+
+    It also could not run from inside the harness image, which has no docker CLI —
+    the port to a pinned client image is what surfaced it.
+    """
+    import psycopg2
+    conn = psycopg2.connect(host=host, port=port, user="postgres",
+                            password="bench", dbname="postgres", connect_timeout=30)
+    conn.autocommit = True
+    cur = conn.cursor()
     lat, rec = [], []
     mech = None
     for j, qv in enumerate(qvecs):
         vec = "[" + ",".join(f"{float(x):.6f}" for x in qv) + "]"
         sql = (f"SELECT gid FROM items WHERE bucket = 0 AND {field} = {value} "
-               f"ORDER BY emb <=> '{vec}' LIMIT {k};")
+               f"ORDER BY emb <=> %s LIMIT {k}")
+
         def call():
-            r = subprocess.run(
-                ["docker", "exec", "-i", "-e", "PGPASSWORD=bench", container,
-                 "psql", "-U", "postgres", "-tAq", "-f", "-"],
-                input=sql, capture_output=True, text=True, timeout=300)
-            return [int(x) for x in r.stdout.split() if x.strip().isdigit()]
+            cur.execute(sql, (vec,))
+            return [int(r[0]) for r in cur.fetchall()]
+
         ids, ms = timed(call, repeats)
         if mech is None:
-            ex = subprocess.run(
-                ["docker", "exec", "-i", "-e", "PGPASSWORD=bench", container,
-                 "psql", "-U", "postgres", "-tAq", "-f", "-"],
-                input="EXPLAIN (COSTS OFF) " + sql, capture_output=True, text=True, timeout=300)
-            plan = ex.stdout
+            cur.execute("EXPLAIN (COSTS OFF) " + sql, (vec,))
+            plan = "\n".join(r[0] for r in cur.fetchall())
             mech = ("index scan" if "Index Scan" in plan else
                     "seq scan" if "Seq Scan" in plan else "other")
-            mech += f" [{len({l.split()[-1] for l in plan.splitlines() if 'Scan on' in l})} relation(s)]"
+            rels = {ln.split()[-1] for ln in plan.splitlines() if "Scan on" in ln}
+            mech += f" [{len(rels)} relation(s)]"
         cut = float(rh.exact_scores(qv, vecs[truths[j]]).min())
         lat.append(ms)
         rec.append(rh.tie_aware_recall(qv, ids, vecs, cut, k))
+    cur.close()
+    conn.close()
     return lat, rec, mech
 
 
@@ -188,9 +203,9 @@ def main() -> None:
                                            qvecs, truths, vecs, args.repeats),
                   "qdrant": lambda: run_qdrant("bench", field, value, args.k,
                                                qvecs, truths, vecs, args.repeats),
-                  "pgvector": lambda: run_pg("bench-pg", field, value, args.k,
-                                             qvecs, truths, vecs, args.repeats,
-                                             vecs.shape[1])}[eng]
+                  "pgvector": lambda: run_pg(adapters.DEFAULT_ENGINE_HOST, field, value,
+                                             args.k, qvecs, truths, vecs,
+                                             args.repeats)}[eng]
             try:
                 lat, rec, mech = fn()
                 rows.append({

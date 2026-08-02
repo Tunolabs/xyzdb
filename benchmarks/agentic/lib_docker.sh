@@ -103,6 +103,36 @@ require_containerised_engine(){   # $1=engine
     }
 }
 
+# ─── The harness runs in its own image too ───────────────────────────────────
+#
+# `bench_py <script> [args…]` runs a harness step inside `Dockerfile.bench`
+# instead of against whatever Python the host has. The engines are pinned by
+# digest; the clients that talk to them are pinned by this image. Before it
+# existed the qdrant client sat two minors behind its own server and chroma could
+# not be installed at all, because the host venv was Python 3.9.
+#
+# The repo is mounted, not baked: editing a runner must not mean rebuilding an
+# image, and an image that carries no benchmark code cannot drift from the repo.
+BENCH_IMG="${BENCH_IMG:-xyzdb-bench:local}"
+BENCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+
+bench_build(){
+    docker build -q -f "$BENCH_DIR/Dockerfile.bench" -t "$BENCH_IMG" "$BENCH_DIR" >/dev/null || {
+        echo "FATAL: could not build $BENCH_IMG" >&2; return 1; }
+}
+
+bench_py(){   # $1=script (repo-relative to benchmarks/agentic), rest=args
+    local repo; repo=$(cd "$BENCH_DIR/../.." && pwd)
+    docker run --rm \
+        --add-host=host.docker.internal:host-gateway \
+        -v "$BENCH_DIR":/bench \
+        -v "$repo/examples/client/python":/client:ro \
+        -e BENCH_ENGINE_HOST=host.docker.internal \
+        -e XYZDB_IMG="${XYZDB_IMG:-}" \
+        -w /bench \
+        "$BENCH_IMG" "$@"
+}
+
 # T2 — full capture, and the exit code of the thing that mattered.
 #
 # Twice a pipe hid a failure (`cmd | head` reporting head's status); once `tail`

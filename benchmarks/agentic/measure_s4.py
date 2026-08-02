@@ -103,7 +103,7 @@ def main():
     ram = sorted(docker_mem_mb(args.container) for _ in range(3))[1]
     rec = {"kind": "s4", "engine": args.engine, "envelope": args.envelope, "storage": args.storage,
            "round": args.round, "ttfq_ms": round(ttfq, 1), "ram_rest_mb": round(ram, 1),
-           "disk_total_mb": disk_mb(args.volume, args.disk_path), "status": None, "stamp": bench_stamp()}
+           "disk_total_mb": disk_mb(args.volume, args.disk_path), "status": None, "stamp": bench_stamp(adapter)}
     open(args.out, "a").write(json.dumps(rec) + "\n")
     print(json.dumps(rec))
 

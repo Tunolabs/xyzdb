@@ -102,15 +102,53 @@ _STAMP = {"bench_commit": _git_short(),
           "images_pinned_on": os.environ.get("IMAGES_PINNED_ON", "")}
 
 
-def bench_stamp():
+def ghost_state(adapter):
+    """Which ghosts exist in the xyzDB cell RIGHT NOW — a named cell condition.
+
+    The engine materialises ghosts on its own, from scan telemetry, when a filter
+    shape repeats and is slow enough to be worth accelerating. So "no ghosts" is
+    not a property of the harness: it is a state the cell happens to be in, and a
+    cell that grew one mid-run is not the same cell it started as. Without this on
+    the record, two runs of the identical script are not comparable and nothing
+    says why.
+
+    Verified per cell, never assumed. It was assumed once — the xyzDB adapter's own
+    docstring claimed "Ghosts OFF (verified: SHOW GHOSTS empty after NEAREST-per-
+    bucket)" and the claim turned out to be true for the wrong reason: the fused
+    NEAREST emits no scan telemetry at all, so it cannot trigger one. True is not
+    the same as checked.
+
+    Returns ``"off"``, or ``"ON: <names>"`` — never a bare boolean, because the
+    names are what makes a contaminated cell diagnosable afterwards.
+    """
+    db = getattr(adapter, "db", None)
+    if db is None:
+        return "n/a"          # not xyzDB: no such mechanism, said rather than blank
+    try:
+        info = db.execute("SHOW GHOSTS").get("info", [])
+    except Exception as e:    # noqa: BLE001 — an unreadable state is not "off"
+        return f"unknown: {str(e)[:60]}"
+    names = [ln.strip().split(" ")[0] for ln in info
+             if ln.strip() and not ln.strip().startswith("Ghost Lobes")]
+    return "off" if not names else "ON: " + ",".join(names)
+
+
+def bench_stamp(adapter=None):
     """Provenance stamp for a measured record — all four engines.
 
     Keys: ``bench_commit``, ``xyzdb_image``, ``rival_images`` (digest-pinned refs),
     ``rival_versions`` (human-readable, read from the live engines), and
     ``images_pinned`` — False whenever any rival ref is not a digest, which is what
     keeps an unpinned run from being mistaken for a reproducible one.
+
+    Pass the adapter to add ``ghosts``, the fifth condition: the four versions say
+    WHAT ran, and ``ghosts`` says what state the engine had organised itself into
+    while running. Omitting the adapter records ``"not_checked"`` rather than
+    ``"off"`` — an unasked question must never read as a clean answer.
     """
-    return dict(_STAMP)
+    st = dict(_STAMP)
+    st["ghosts"] = ghost_state(adapter) if adapter is not None else "not_checked"
+    return st
 
 
 # ── post-load settle to state parity (change 3) ──────────────────────────────

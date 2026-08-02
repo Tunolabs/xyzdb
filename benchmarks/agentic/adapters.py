@@ -12,6 +12,14 @@ p99≤50ms) and frozen for held-out.
 """
 import os
 from typing import List
+
+# Where the engines answer. 127.0.0.1 when a runner is invoked on the host;
+# `host.docker.internal` when the harness itself runs in `Dockerfile.bench`, which
+# is how the rival CLIENTS get pinned alongside their servers instead of inheriting
+# whatever Python the host has. One env var rather than a parameter threaded
+# through every call site — the address is a property of where the harness runs,
+# not of any single measurement.
+DEFAULT_ENGINE_HOST = os.environ.get("BENCH_ENGINE_HOST", "127.0.0.1")
 import numpy as np
 
 BATCH = 2000
@@ -106,7 +114,7 @@ class XyzdbAdapter:
     envelope. Ghosts OFF (verified: SHOW GHOSTS empty after NEAREST-per-bucket). No dial."""
     name = "xyzdb"
 
-    def __init__(self, host="127.0.0.1", port=2505, dim=1024, scoped=True,
+    def __init__(self, host=DEFAULT_ENGINE_HOST, port=2505, dim=1024, scoped=True,
                  satellite=None, lobe="mem", **_):
         import xyzdb_minimal as xyzdb
         self.db = xyzdb.connect(host, port, timeout=300.0)
@@ -205,7 +213,7 @@ class XyzdbAdapter:
 class PgvectorAdapter:
     name = "pgvector"
 
-    def __init__(self, host="127.0.0.1", port=5432, dim=1024, hnsw=None, scoped=False, **_):
+    def __init__(self, host=DEFAULT_ENGINE_HOST, port=5432, dim=1024, hnsw=None, scoped=False, **_):
         import psycopg2
         from pgvector.psycopg2 import register_vector
         self.dim, self.scoped = dim, scoped
@@ -345,7 +353,7 @@ class PgvectorAdapter:
 class QdrantAdapter:
     name = "qdrant"
 
-    def __init__(self, host="127.0.0.1", port=6333, dim=1024, hnsw=None, scoped=False,
+    def __init__(self, host=DEFAULT_ENGINE_HOST, port=6333, dim=1024, hnsw=None, scoped=False,
                  s1_variant="scroll", **_):
         from qdrant_client import QdrantClient
         self.dim, self.scoped = dim, scoped
@@ -480,7 +488,7 @@ class QdrantAdapter:
 class ChromaAdapter:
     name = "chroma"
 
-    def __init__(self, host="127.0.0.1", port=8000, dim=1024, hnsw=None, scoped=False, **_):
+    def __init__(self, host=DEFAULT_ENGINE_HOST, port=8000, dim=1024, hnsw=None, scoped=False, **_):
         import chromadb
         self.client = chromadb.HttpClient(host=host, port=port)
         self.dim, self.scoped = dim, scoped
