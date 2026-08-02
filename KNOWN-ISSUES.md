@@ -17,6 +17,64 @@ As of **1.1.0**.
 
 ## Correctness
 
+### A bloom filter can report a key absent that is present, after an unclean restart
+
+**What.** An SSTable written during crash recovery can carry a bloom filter that
+disagrees with its own data. Every **point** lookup is bloom-gated: the filter is
+consulted first, and a "not present" answer skips the read. So a key that exists can
+be reported missing, and each caller then does whatever it does when a key is
+genuinely absent.
+
+**Root cause: NOT diagnosed.** Three mechanisms remain candidates — a bloom built
+with zero bits (which matches everything, so it cannot cause this), a torn bloom on
+disk, and a seqno/replay interaction. None has been confirmed, and the reproduction
+is flaky. We are not going to name a cause we have not established.
+
+**Where it is now closed.** Two paths, for two different reasons.
+
+The duplicate-anchor check on the write path (`ops/put.rs`) confirms a miss
+**without** the bloom before trusting it. That is where a false negative would break
+`UNIQUE`.
+
+The declaration loads at boot — gravity, vector and satellite — no longer use a point
+lookup at all. They read their reserved prefix with a **range scan**, which never
+consults the bloom, because the filter answers point questions. That removes the
+exposure rather than teaching the caller to distrust the filter, and it replaces one
+lookup per lobe with a single pass. A range scan applies the same MVCC snapshot as a
+point read and excludes tombstones, so a retired declaration stays retired.
+
+**This one was demonstrated, not argued.** With the bloom forged to answer "absent"
+for every key — the bit array zeroed while `num_bits` stays non-zero — the old
+loaders brought the lobe up reporting `Vector: (none)`. The axis was gone, and
+nothing said so. `tests/spec_load_bloom_false_negative.rs` asserts both halves: that
+the forge really does blind lookups, and that the axes survive it.
+
+**Where it is still NOT closed.** Every remaining bloom-gated point lookup trusts the
+filter:
+
+- The pinned anchor fields and their legacy key, also loaded at boot. Same shape the
+  specs had, not yet converted.
+- The duplicate check in `DECLARE ANCHOR`, and a ghost metadata load.
+- **The ghost's point-read of a source record** (`ghost/read.rs`). The sharpest of
+  the three: its miss branch skips the record, so a false negative there **silently
+  drops rows from a result** rather than raising anything. And ghosts are materialised
+  by the engine itself, so that exposure can appear without anyone writing a query
+  differently.
+
+**Reachability, precisely.** Demonstrated for the boot loads — that is what the forged
+test showed before the fix. Not demonstrated for the paths above: whether a real
+post-recovery bloom reaches them has never been measured, and the live reproduction is
+flaky. What is no longer available is the comfortable argument that these keys are old
+and already compacted and therefore safe. It did not hold where it was checked.
+
+**What it costs you, and the workaround.** The window is an unclean restart. A
+graceful shutdown followed by a clean open does not open it. If a process did come up
+from a dirty restart, `xyzdb_recovered_from_wal` in `STATS` and `/metrics` reports it
+— treat that as a degraded mode, and prefer a clean restart before trusting a lobe's
+declarations.
+
+---
+
 ### `PULL` can return without the requested root under concurrent load
 
 **What.** `FIND "lobe" WHERE code = "C-1" | PULL 1` returns the linked children but

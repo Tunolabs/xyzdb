@@ -244,21 +244,41 @@ impl Engine {
         dictionary: &turba_engine::tree::Tree,
         lobes: &LobeRegistry,
     ) -> (HashMap<String, GravitySpec>, bool) {
+        // PREFIX SCAN, not one point-get per lobe. A point lookup is bloom-gated,
+        // and a post-recovery SSTable can carry a bloom that disagrees with its data
+        // (see KNOWN-ISSUES.md — root not diagnosed). Here the miss branch is
+        // indistinguishable from "no gravity declared", so a false negative would
+        // bring the lobe up WITHOUT its axis: no placement, and new writes landing
+        // outside the bucket the declaration promised.
+        //
+        // A range scan does not consult the bloom at all — the filter answers point
+        // questions — so this removes the exposure instead of learning to distrust
+        // it. It also replaces N lookups with one pass. `prefix_iter` applies the
+        // same MVCC snapshot as `get` and excludes tombstones (verified in
+        // `tree/mod.rs`), so a retired declaration stays retired.
+        let by_id: HashMap<u16, &str> = lobes.all().map(|(name, c)| (c.id, name)).collect();
         let mut result = HashMap::new();
         let mut needs_migration = false;
-        for (name, config) in lobes.all() {
-            let mut key = Vec::with_capacity(4);
-            key.extend_from_slice(&GRAVITY_PREFIX);
-            key.extend_from_slice(&config.id.to_be_bytes());
+        let Ok(entries) = dictionary.prefix_iter(&GRAVITY_PREFIX) else {
+            return (result, needs_migration);
+        };
+        for entry in entries {
+            let Some(id_bytes) = entry.key.get(GRAVITY_PREFIX.len()..) else {
+                continue;
+            };
+            let Ok(id_arr) = <[u8; 2]>::try_from(id_bytes) else {
+                continue; // not a lobe-id slot under this prefix
+            };
+            let Some(name) = by_id.get(&u16::from_be_bytes(id_arr)) else {
+                continue; // declaration for a lobe that no longer exists
+            };
             // decode handles all three slot formats (0x03 value-only, 0x02 Fase-0,
             // 0x01 bare field name → Raw); slot_is_pre_d1 flags the older two.
-            if let Ok(Some(val)) = dictionary.get(&key)
-                && let Some(spec) = GravitySpec::decode(&val)
-            {
-                if GravitySpec::slot_is_pre_d1(&val) {
+            if let Some(spec) = GravitySpec::decode(&entry.value) {
+                if GravitySpec::slot_is_pre_d1(&entry.value) {
                     needs_migration = true;
                 }
-                result.insert(name.to_string(), spec);
+                result.insert((*name).to_string(), spec);
             }
         }
         (result, needs_migration)

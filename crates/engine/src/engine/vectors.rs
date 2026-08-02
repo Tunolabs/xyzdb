@@ -144,14 +144,28 @@ impl Engine {
         lobes: &LobeRegistry,
     ) -> HashMap<String, crate::vector_spec::VectorSpec> {
         let mut result = HashMap::new();
-        for (name, config) in lobes.all() {
-            let mut key = Vec::with_capacity(4);
-            key.extend_from_slice(&crate::reserved_keys::VECTOR_FIELD);
-            key.extend_from_slice(&config.id.to_be_bytes());
-            if let Ok(Some(val)) = dictionary.get(&key)
-                && let Some(spec) = crate::vector_spec::VectorSpec::decode(&val)
-            {
-                result.insert(name.to_string(), spec);
+        // PREFIX SCAN, not one point-get per lobe: a point lookup is bloom-gated,
+        // and a miss here is indistinguishable from "not declared", so a bloom
+        // false negative after an unclean restart would bring the lobe up
+        // without its axis. A range scan never consults the bloom, and applies
+        // the same MVCC snapshot with tombstones excluded. See KNOWN-ISSUES.md.
+        let by_id: std::collections::HashMap<u16, &str> =
+            lobes.all().map(|(name, c)| (c.id, name)).collect();
+        let Ok(entries) = dictionary.prefix_iter(&crate::reserved_keys::VECTOR_FIELD) else {
+            return result;
+        };
+        for entry in entries {
+            let Some(id_bytes) = entry.key.get(crate::reserved_keys::VECTOR_FIELD.len()..) else {
+                continue;
+            };
+            let Ok(id_arr) = <[u8; 2]>::try_from(id_bytes) else {
+                continue;
+            };
+            let Some(name) = by_id.get(&u16::from_be_bytes(id_arr)) else {
+                continue;
+            };
+            if let Some(spec) = crate::vector_spec::VectorSpec::decode(&entry.value) {
+                result.insert((*name).to_string(), spec);
             }
         }
         result
