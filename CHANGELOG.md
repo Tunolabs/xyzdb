@@ -26,6 +26,12 @@ Minor, not patch: new grammar, new response fields and new `STATS` / `/metrics` 
 - **Table ids are monotonic across restarts**, so one identity can never name two different table contents.
 - **`PUT … ON CONFLICT UPDATE` notifies ghosts.** An upsert skipped the ghost hook, so an aggregate ghost kept serving its pre-upsert sums and counts as current. **Ghost state is persisted, so run `REFRESH GHOST` once after upgrading** for aggregate ghosts over lobes that take upserts — the fix stops new drift, it does not repair drift already recorded.
 - **`PUT … ON CONFLICT UPDATE` writes through the record cache.** A cached read could return the record as it was before the upsert — a read-your-own-write violation. The cache is in-memory, so the upgrade restart clears any staleness; no action needed.
+- **A ghost-routed read returned records without the declared vector.** V5 keeps the searchable vector in its own column; the ghost's point-read did not re-attach it. Since ghosts are materialised by the engine from scan telemetry, the same query returned different fields before and after one was built, with nothing written in between — and an unfused `NEAREST` over that scan returned zero rows, which reads as "no matches". No action needed: nothing on disk is wrong, the vector was always in its column.
+- **A longer pipeline no longer shrinks a `NEAREST`'s candidate set.** The fused plan was gated on the pipeline being exactly `SCAN | NEAREST`, so appending a step (`| SHAPE {id}`) dropped the query into the generic loop, where the scan materialises one 1000-record page and `NEAREST` ranks inside it. The fused plan is now chosen whenever the pipeline *starts* with those two steps.
+
+### Changed
+
+- **A truncated `NEAREST` refuses a mutating or aggregating next step.** When the latency airbag cuts the candidate set, a following `SET`, `DELETE` or `AGGREGATE` now errors instead of running: those results cannot carry `budget_stop`, so the write or the total would silently cover only the part that was scored. Read-only steps still compose and the flag travels with them.
 
 ## [1.0.0] — 2026-07-30 (1.0 launch)
 

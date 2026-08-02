@@ -1049,6 +1049,14 @@ So under `"score_order"` a client can upgrade "there may be more" to "almost cer
 
 The object describes the **cut, not the set**. `examined` is what was checked, not what exists; and because there is no cursor, `candidates - examined` is **not** "the remainder, request it" — those candidates are unchecked, not pending, and there is no call that returns them. The only responses to a `budget_stop` are: raise `--nearest-budget-ms`, narrow the query scope, or accept the partial. `budget_stop` is present **only** on this truncated NEAREST frame; every other `PaginatedRecords` omits it, so ordinary pagination frames are byte-identical to before it existed.
 
+**A cut `NEAREST` refuses a mutating or aggregating next step.** Read-only steps
+(`SHAPE`, `TAKE`, `PULL`, `FOLLOW`) compose after a truncated `NEAREST` and the flag
+travels to the end with them. `SET`, `DELETE` and `AGGREGATE` do not: their results
+are not `PaginatedRecords` and have nowhere to carry `budget_stop`, so the write or
+the total would silently cover only the part the budget managed to score. The
+pipeline errors instead, naming the budget. Raise `--nearest-budget-ms` or narrow
+the scope, then re-run.
+
 ---
 
 ### Tier 4 — Operator (deprecated as language)
