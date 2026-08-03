@@ -3,7 +3,7 @@
 A semantic gravity database. Related records live together on disk by identity — graph traversal is a range scan, aggregates are metadata reads, pre-aggregations build themselves from observed query telemetry. A single-tier hardened LSM engine; semantic vector search (`NEAREST`) runs as an exact, gravity-bounded scan with no ANN index — embeddings are always supplied by the caller; the engine never embeds.
 
 ```
-Bench — native cross-engine · AWS m6a.xlarge · T6 envelope (2C/8GB) · scale 1.0 ≈ 150 M · 3-pass pooled · parity-fair
+Bench — native cross-engine · AWS m6a.xlarge · 2 vCPU / 8 GB · scale 1.0 ≈ 150 M · 3-pass pooled · parity-fair
 
   Cold P50:        xyzDB wins 6/9 queries, 1.6–3.4× over the runner-up
   Concurrent P99:  worst of all 9 queries — xyzDB 8.6 ms · PostgreSQL 747 ms · MongoDB 155 ms
@@ -277,6 +277,7 @@ xyzDB is designed for a specific problem: applications with graph-shaped data wh
 - **No full-text search, no global ANN index.** Vector similarity (`NEAREST`, v0.8) is an **exact** cosine/dot/l2 scan **bounded to a gravity bucket** — there is no HNSW/IVF/ANN index for whole-lobe nearest-neighbour, and no full-text search. The engine never embeds: the caller always supplies the vector.
 - **`NEAREST` cannot be served from a ghost.** Routed explicitly through one (`SCAN GHOST "<name>" … | NEAREST`), it returns the ghost's index entries — null LIDs, only the embedded fields — not resolved records. Use a plain `SCAN … | NEAREST`: a filter that matches a ghost still routes through it for the filter but falls back to primary point-reads for the vector and returns correct records.
 - **`FIND` and `PULL` don't self-limit — yet.** Without an explicit `LIMIT`, `FIND` returns every matching record and `PULL` every linked record — there is no default row cap (unlike `SCAN`, capped at `SCAN_LIMIT_DEFAULT = 1000`) and no time budget (unlike `NEAREST`'s `--nearest-budget-ms`); `PULL` bounds only traversal depth (`MAX_PULL_DEPTH = 10`), not cardinality. Pass a `LIMIT` for interactive queries over large lobes. A default cap and query budget are a roadmap item.
+- **No in-place migration across an on-disk format change.** A data directory written before 1.0 is refused at open, and there is no converter: the supported path is re-ingestion from source. Within the 1.x line a minor bump does not imply a format change (1.0 → 1.1 has none, so it upgrades in place) — the release notes say which is which, and the engine refuses rather than guessing. `xyzdb-cli admin migrate` is a different tool: it rehashes gravity keys, it is not a record-format converter. See `OPERATIONS.md` §8.4-§8.5.
 - **Not battle-tested.** PostgreSQL has 30 years of production. xyzDB has the published benchmarks in [`docs/benchmark-native.md`](docs/benchmark-native.md) and the regression tests above.
 
 ---
@@ -286,7 +287,7 @@ xyzDB is designed for a specific problem: applications with graph-shaped data wh
 - **Rust** the build toolchain is pinned to **1.96 / edition 2024** in `rust-toolchain.toml` — the only toolchain built and CI-tested. Edition 2024 sets the language floor at 1.85, but earlier toolchains are not tested and are not a supported MSRV.
 - **OS** Linux (Docker-tested) and macOS (development + benchmarking on Docker Desktop / OrbStack).
 - **Storage** SSD gives the best *absolute* latency and is the default. HDD is a **first-class profile, not a degraded mode**: a dedicated storage profile widens block sizes and raises bloom bits per key, and it is where xyzDB's *relative* lead is largest — **8/9 cold wins** and a worst concurrent P99 of **20.2 ms vs PostgreSQL's 3 482 ms (~170×)**, versus 6/9 and 8.6 ms vs 747 ms on SSD. Run on cheap disk and stay fast.
-- **Memory** runs in 2 GB (T2) for light workloads; 8 GB (T6) is the benchmark reference.
+- **Memory** runs in 2 GB for light workloads; 8 GB is the benchmark reference. The engine derives its budgets from the cgroup limit, so a smaller container works — it is not a supported-versus-unsupported line.
 
 Core dependencies: `crossbeam-skiplist` (lock-free memtable), `arc-swap` (zero-lock version swap), `parking_lot`, `zstd` + `lz4_flex`, `xxhash-rust/xxh3`, `tikv-jemallocator` (Linux global allocator). No network database dependencies — `turba-engine` is a from-scratch LSM, not a wrapper.
 

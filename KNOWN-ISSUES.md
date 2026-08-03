@@ -293,7 +293,10 @@ Design limits — things xyzDB does not do, as opposed to things it does wrong �
 listed in the README under
 [**What xyzDB is not**](README.md#what-xyzdb-is-not), and are not repeated here.
 That includes the unbounded `FIND`/`PULL` result sets and the absence of an in-place
-migration from pre-1.0 data directories.
+migration across an on-disk format change. Both are bullets in that section — checked,
+because this file has already sent readers to a section that did not contain what was
+promised (see the plaintext-token note below), and a pointer to the wrong place is worse
+than no pointer: the reader concludes the limitation is undocumented.
 
 One limitation lives elsewhere and is pointed at rather than moved: the auth token is
 stored **in plaintext on disk**, stated in
