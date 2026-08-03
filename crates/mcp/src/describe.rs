@@ -199,7 +199,7 @@ fn parse_ghost_line(line: &str, lobe: &str) -> Option<GhostInfo> {
 /// ```text
 /// Profile for 'lobe':
 ///   Pinned: field1, field2          OR  Pinned: (none)
-///   Learned: (no scan patterns yet) OR  Learned patterns:
+///   Learned: (no scan patterns yet) OR  Learned: 3 pattern(s)
 ///                                         <indented pattern 1>
 ///                                         <indented pattern 2>
 ///   Ghosts: (none)                  OR  Ghosts: 3 active
@@ -235,13 +235,18 @@ pub fn parse_show_profile(lines: &[String]) -> ProfileInfo {
             continue;
         }
 
-        if trimmed == "Learned: (no scan patterns yet)" {
-            section = Section::None;
-            continue;
-        }
-
-        if trimmed == "Learned patterns:" {
-            section = Section::LearnedItems;
+        // `Learned:` has two forms and this parser used to match the second one
+        // by a literal that the engine no longer emits ("Learned patterns:"),
+        // which silently emptied the section instead of failing. Match on the
+        // label and decide from the value, the same shape used for `Ghosts:`
+        // below — a reader keyed to one exact sentence breaks the moment the
+        // writer rewords it.
+        if let Some(rest) = trimmed.strip_prefix("Learned:") {
+            section = if rest.trim() == "(no scan patterns yet)" {
+                Section::None
+            } else {
+                Section::LearnedItems
+            };
             continue;
         }
 
@@ -541,7 +546,7 @@ mod tests {
         let lines = vec![
             "Profile for 'creditos':".to_string(),
             "  Pinned: (none)".to_string(),
-            "  Learned patterns:".to_string(),
+            "  Learned: 2 pattern(s)".to_string(),
             "    pattern_1 — 5 hits, avg 23 ms".to_string(),
             "    pattern_2 — 7 hits, avg 41 ms".to_string(),
             "  Ghosts: (none)".to_string(),
@@ -574,7 +579,7 @@ mod tests {
         let lines = vec![
             "Profile for 'creditos':".to_string(),
             "  Pinned: monto, rfc".to_string(),
-            "  Learned patterns:".to_string(),
+            "  Learned: 2 pattern(s)".to_string(),
             "    p1".to_string(),
             "  Ghosts: 1 active".to_string(),
             "    g1 — ...".to_string(),

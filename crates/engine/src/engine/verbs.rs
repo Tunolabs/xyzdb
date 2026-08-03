@@ -31,7 +31,9 @@ impl ProfileLine {
     }
 
     /// Every variant. Kept beside `label` so the compiler error that lands there
-    /// puts whoever adds a line in front of this list too.
+    /// puts whoever adds a line in front of this list too. Test-only: the emitter
+    /// names variants directly, the gate is what needs the list.
+    #[cfg(test)]
     const ALL: [ProfileLine; Self::COUNT] = [
         ProfileLine::Gravity,
         ProfileLine::Pinned,
@@ -43,6 +45,7 @@ impl ProfileLine {
 
     /// Number of variants. A new one makes `label` fail to compile; fixing that
     /// lands here, and `ALL` is length-checked against it.
+    #[cfg(test)]
     const COUNT: usize = 6;
 
     /// `"  Label: (none)"` — the shape every three-state line uses when the lobe
