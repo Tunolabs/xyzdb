@@ -740,6 +740,14 @@ impl XyzdbServer {
             describe::PartialResult::Ok(p) => p.satellite.clone(),
             describe::PartialResult::Err { .. } => None,
         };
+        // The PRIMARY axis, hoisted for the same reason as the other two and with
+        // more force: it decides whether a query is bounded at all. Without it a
+        // caller could see the satellite — which only means something relative to
+        // the gravity bucket it subdivides — and not the bucket.
+        let gravity = match &profile {
+            describe::PartialResult::Ok(p) => p.gravity.clone(),
+            describe::PartialResult::Err { .. } => None,
+        };
         let response = describe::LobeDescription {
             name: lobe.to_string(),
             anchors,
@@ -747,6 +755,7 @@ impl XyzdbServer {
             profile,
             vector,
             satellite,
+            gravity,
         };
         serde_json::to_string_pretty(&response).map_err(|e| {
             McpError::internal_error(format!("describe_lobe serialize failed: {e}"), None)

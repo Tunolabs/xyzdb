@@ -302,6 +302,20 @@ impl Engine {
 
         let mut lines = vec![format!("Profile for '{lobe}':")];
 
+        // Gravity axis (if declared). Emitted FIRST because it is the lobe's
+        // primary declaration: it decides whether a query is bounded to one bucket
+        // or sweeps the whole lobe. It was missing from this profile entirely —
+        // `Pinned`, `Vector` and `Satellite` were reported and the axis they hang
+        // off was not — so an agent reading a lobe over MCP could discover the
+        // satellite and not the thing that makes the satellite mean anything.
+        //
+        // Same three-state shape as `Vector:` and `Satellite:`, so the parser on
+        // the other side reads it the same way.
+        match self.get_gravity_spec(lobe) {
+            Some(spec) => lines.push(format!("  Gravity: {}", spec.fields().join(", "))),
+            None => lines.push("  Gravity: (none)".into()),
+        }
+
         // Pinned fields
         let pins = self.pinned_fields.read();
         let pinned = pins.get(lobe);

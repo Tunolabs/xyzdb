@@ -58,6 +58,12 @@ pub struct LobeDescription {
     /// gravity bucket) while a range is not (`field < X` sweeps the parent). A
     /// caller that cannot see it cannot choose the cheap shape.
     pub satellite: Option<String>,
+    /// The lobe's gravity field(s) — its PRIMARY axis.
+    ///
+    /// CONTRACT, and the one the satellite hangs off. A query pinning it reads one
+    /// bucket; a query that does not sweeps the lobe. A caller that can see the
+    /// satellite but not this can choose a sub-range of a bucket it never bounded.
+    pub gravity: Option<String>,
 }
 
 #[derive(Debug, Serialize, JsonSchema)]
@@ -110,6 +116,12 @@ pub struct ProfileInfo {
     /// treatment as `vector`: parse target here, hoisted to the top level.
     #[serde(skip)]
     pub satellite: Option<String>,
+    /// Gravity axis parsed from the SHOW PROFILE `Gravity:` line — the lobe's
+    /// PRIMARY declaration, and the one that decides whether a query is bounded to
+    /// one bucket or sweeps the lobe. Same treatment as the two above. `None` on an
+    /// engine older than the release that added the line.
+    #[serde(skip)]
+    pub gravity: Option<String>,
 }
 
 // ─── Parsers ────────────────────────────────────────────────────────────────
@@ -201,6 +213,7 @@ pub fn parse_show_profile(lines: &[String]) -> ProfileInfo {
     // Absent when talking to an older server that predates the Vector line —
     // treated as "no vector reported", never a parse error.
     let mut vector: Option<VectorField> = None;
+    let mut gravity: Option<String> = None;
     let mut satellite: Option<String> = None;
 
     #[derive(PartialEq)]
@@ -242,6 +255,17 @@ pub fn parse_show_profile(lines: &[String]) -> ProfileInfo {
             section = Section::GhostItems;
             if let Some(n_str) = rest.split_whitespace().next() {
                 active_ghosts_count = n_str.parse().unwrap_or(0);
+            }
+            continue;
+        }
+
+        // The gravity axis. Parsed the same way as `Satellite:` and tolerant of a
+        // profile that lacks the line: an engine older than the release that added
+        // it simply reports no axis, rather than failing to describe the lobe.
+        if let Some(rest) = trimmed.strip_prefix("Gravity: ") {
+            section = Section::None;
+            if rest != "(none)" {
+                gravity = Some(rest.to_string());
             }
             continue;
         }
@@ -289,6 +313,7 @@ pub fn parse_show_profile(lines: &[String]) -> ProfileInfo {
         active_ghosts_count,
         vector,
         satellite,
+        gravity,
     }
 }
 
@@ -328,6 +353,7 @@ mod tests {
             active_ghosts_count: 0,
             vector: None,
             satellite: None,
+            gravity: None,
         });
         let v: serde_json::Value = serde_json::to_value(&r).unwrap();
         assert!(v.get("pinned_fields").is_some());

@@ -29,6 +29,10 @@ Minor, not patch: new grammar, new response fields and new `STATS` / `/metrics` 
 - **A ghost-routed read returned records without the declared vector.** V5 keeps the searchable vector in its own column; the ghost's point-read did not re-attach it. Since ghosts are materialised by the engine from scan telemetry, the same query returned different fields before and after one was built, with nothing written in between — and an unfused `NEAREST` over that scan returned zero rows, which reads as "no matches". No action needed: nothing on disk is wrong, the vector was always in its column.
 - **A longer pipeline no longer shrinks a `NEAREST`'s candidate set.** The fused plan was gated on the pipeline being exactly `SCAN | NEAREST`, so appending a step (`| SHAPE {id}`) dropped the query into the generic loop, where the scan materialises one 1000-record page and `NEAREST` ranks inside it. The fused plan is now chosen whenever the pipeline *starts* with those two steps.
 
+### Added
+
+- **`SHOW PROFILE` reports the gravity axis, and `describe_lobe` exposes it.** The profile listed `Pinned`, `Vector`, `Satellite` and `Learned` — every declaration except the primary one — so an agent reading a lobe over MCP could discover the satellite axis without discovering the bucket it subdivides. The line is additive with the same three-state shape as `Vector:`/`Satellite:`, the MCP parser tolerates an engine that does not emit it, and `gravity` is hoisted to the top level of the description beside `vector` and `satellite`.
+
 ### Changed
 
 - **A truncated `NEAREST` refuses a mutating or aggregating next step.** When the latency airbag cuts the candidate set, a following `SET`, `DELETE` or `AGGREGATE` now errors instead of running: those results cannot carry `budget_stop`, so the write or the total would silently cover only the part that was scored. Read-only steps still compose and the flag travels with them.
