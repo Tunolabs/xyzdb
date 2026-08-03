@@ -1,10 +1,13 @@
 # xyzDB MCP integration guide
 
+**Audience**: whoever wires an agent to xyzDB — installing the MCP server, choosing a mode, setting a query policy.
+**Surface**: the MCP tools and resources, and the flags of the `xyzdb-mcp` binary. The tool *descriptions* themselves live in the binary (`crates/mcp/src/main.rs`) and are what the agent reads; this guide is for the human in front of it. When the two disagree, the binary is what shipped.
+
 `xyzdb-mcp` is a Model Context Protocol server that exposes xyzDB to MCP-compatible clients over stdio. It speaks JSON-RPC 2.0 framed by line-delimited messages — the same surface every other DB MCP server uses today.
 
 The server is single-tenant by design (one client process per server process). Multi-actor TLS+auth deployments (real auth — mTLS or JWT with rotation, over HTTP+SSE) are not yet available.
 
-This document describes the MCP surface as of **1.0**. The tools/resources contract is stable — **5 tools** (`stats`, `query`, `snapshot`, `list_lobes`, `describe_lobe`) + 3 resources (`xyzdb://lobes`, `xyzdb://stats`, `xyzdb://lobes/{name}`).
+This document describes the MCP surface as of **1.1**. The tools/resources contract is stable — **5 tools** (`stats`, `query`, `snapshot`, `list_lobes`, `describe_lobe`) + 3 resources (`xyzdb://lobes`, `xyzdb://stats`, `xyzdb://lobes/{name}`). 1.1 added fields, never tools: `gravity` and `satellite` on `describe_lobe`, `budget_stop` on a truncated `NEAREST`, `invariant_guards` and `recovered_from_wal` on `stats`.
 
 > **`/stats` schema delta in v0.5.0**: `scheduler.compaction_blocked_us_total` is removed (DEC-V5-12). Consumers parsing it must drop the field. All other `/stats.scheduler.*` fields unchanged (per-lane `p50_us`, `ewma_p50_us`, `slo_breach_count`, `cross_lane_outstanding_peak`).
 
@@ -147,6 +150,8 @@ All five tools return JSON in the MCP standard `CallToolResult.content[0].text` 
 
 Snapshot of engine internals: keyspace stats (memtables, SSTables, compaction counters), block cache, ghosts, sync thread health, process and cgroup memory. Same shape as the `/stats` endpoint on `xyzdb-server`'s TCP port.
 
+Two fields are correctness signals, not capacity: `invariant_guards` (counters that never reset — a non-zero `level_overlap` means point reads can miss keys a scan still finds; a non-zero `anchor_bloom_false_negative` means the guard stopped a duplicate under a `UNIQUE` key after an unclean restart) and `recovered_from_wal` (the last start replayed the WAL, so the previous shutdown was unclean). See `OPERATIONS.md` for what to do about each.
+
 No arguments. Sub-50 ms latency on every realistic data dir size.
 
 ### `query`
@@ -160,6 +165,8 @@ Execute an arbitrary xyTalk statement. Arguments:
 | `params` | object | no | Bound parameters `{"name": value}` substituted for `$name` placeholders before execution (anti-injection — untrusted text never enters the statement as syntax). Supported in `--embed` only; passing non-empty `params` on `--connect` returns `INVALID_PARAMS`. |
 
 Read-only and no-destructive postures can be enforced **at the MCP layer** via `--query-policy` (see below), in addition to any trust-boundary controls (filesystem permissions on `--embed`, server-side role on `--connect`). The tool description includes the xyTalk surface the agent should know about.
+
+Response: the engine's JSON verbatim, so everything `PROTOCOL.md` §8.1 says a client must not drop applies here — in particular `has_more`, `cursor` (emitted as `null` when there is no next page) and `budget_stop`. `budget_stop` appears only on a `NEAREST` the latency airbag cut short: `has_more` is `true` with `cursor: null`, because there is no page to resume, and the records are the highest-scoring ones found within budget. A caller that reads that frame as a complete top-k is wrong in the one way the field exists to prevent.
 
 Verb policy: `--query-policy <VALUE>` restricts which xyTalk verbs the `query` tool accepts, enforced at the MCP layer **before** the statement reaches the engine. Statements are classified by parsed AST (not substring match); a statement that cannot be parsed is refused under a restricted policy rather than forwarded unverified. Values:
 
@@ -177,9 +184,11 @@ Returns the count and an array of `{name, anchor_count, hint?}`. No arguments. E
 
 ### `describe_lobe`
 
-Composite schema introspection for a single lobe — anchors, ghosts (filtered by `source_lobe = name`), profile (pinned fields, learned scan patterns, active ghost count), and the two declared axes hoisted to the top level, `vector` and `satellite`. One argument: `lobe: string` (validated non-empty pre-engine; missing lobe → `INVALID_PARAMS` top-level).
+Composite schema introspection for a single lobe — anchors, ghosts (filtered by `source_lobe = name`), profile (pinned fields, learned scan patterns, active ghost count), and the three declared axes hoisted to the top level: `gravity`, `vector` and `satellite`. One argument: `lobe: string` (validated non-empty pre-engine; missing lobe → `INVALID_PARAMS` top-level).
 
-`satellite` is `null` unless the lobe declares a sub-gravity axis (`SATELLITE BY <field>`), in which case it names that field. It is contract, not decoration: an equality on the axis reads one sub-range of the gravity bucket while a range sweeps the parent, so it tells an agent which query shape is cheap. `vector` is `null` when the lobe has no searchable embedding field, else `{"field": ..., "dim": ...}`. A `null` `dim` means the dimension is not fixed yet (declared, but no embedding written): an agent may choose it on the first write. A set `dim` means every `NEAREST` query vector must match it — the engine never embeds, so the caller supplies the vector.
+`gravity` names the lobe's primary co-location axis and is the one to read first: a query pinning it reads one bucket, a query that does not sweeps the lobe. It is `null` when no axis is declared. The MCP parser tolerates an engine that does not emit the `Gravity:` line in `SHOW PROFILE`, so an older server yields `null` rather than an error.
+
+`satellite` is `null` unless the lobe declares a sub-gravity axis (`SATELLITE BY <field>`), in which case it names that field — a sub-range *of* the gravity bucket, so it only means something together with `gravity`. It is contract, not decoration: an equality on the axis reads one sub-range of the gravity bucket while a range sweeps the parent, so it tells an agent which query shape is cheap. `vector` is `null` when the lobe has no searchable embedding field, else `{"field": ..., "dim": ...}`. A `null` `dim` means the dimension is not fixed yet (declared, but no embedding written): an agent may choose it on the first write. A set `dim` means every `NEAREST` query vector must match it — the engine never embeds, so the caller supplies the vector.
 
 Per-field independent fallibility: each of the three sub-results lands either as its parsed payload OR as `{"error": "..."}` if its SHOW call failed. The agent receives explicit error markers for whatever did not succeed, rather than total failure or silent omission.
 
