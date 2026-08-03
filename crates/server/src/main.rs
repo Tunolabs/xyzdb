@@ -20,7 +20,10 @@ use xyzdb_engine::throttle::ThrottleConfig;
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 #[derive(Parser)]
-#[command(name = "xyzdb-server", about = "xyzDB database server")]
+// `version` is not decoration: OPERATIONS.md §8.4 makes `xyzdb-server --version`
+// the first diagnostic step of a format-mismatch incident, and without this the
+// binary answered that step with "unexpected argument".
+#[command(name = "xyzdb-server", version, about = "xyzDB database server")]
 struct Args {
     /// Path to the database directory. Defaults to `./data/xyzdb` when
     /// unset.

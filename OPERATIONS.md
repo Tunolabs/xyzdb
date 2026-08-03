@@ -190,7 +190,7 @@ The snapshot directory contains:
 - `journal.wal` — copied at snapshot point. Captures sealed-but-unflushed memtable writes that recover on restore via WAL replay.
 - `snapshot.meta` — JSON sidecar with provenance (timestamp, SST inventory, WAL bytes, lock window, BULKMODE flag).
 
-> **Snapshot under load — resolved in v0.8.2.** Earlier builds could fail a hot snapshot with a `hard_link` error ("No such file or directory") under sustained writes: `set_compaction_enabled(false)` did not drain in-flight compaction before `live_table_paths()`, so a compaction finishing mid-capture left dangling SST paths (the snapshot dir ended up partial — typically only `spatial/`, no MANIFEST). **v0.8.2 drains in-flight compaction** — it disables compaction and acquires each tree's compaction lock (which waits for the in-flight pass) **before** taking the WAL lock, and holds the guards across the hard-link loop (`crates/turba-engine/src/engine.rs`). The drain happens before the WAL lock, so it does not block writers. Hot snapshots are now safe under sustained load.
+> **Snapshot under load — resolved before 1.0, so every released build has the fix.** Earlier builds could fail a hot snapshot with a `hard_link` error ("No such file or directory") under sustained writes: `set_compaction_enabled(false)` did not drain in-flight compaction before `live_table_paths()`, so a compaction finishing mid-capture left dangling SST paths (the snapshot dir ended up partial — typically only `spatial/`, no MANIFEST). **Current builds drain in-flight compaction** — it disables compaction and acquires each tree's compaction lock (which waits for the in-flight pass) **before** taking the WAL lock, and holds the guards across the hard-link loop (`crates/turba-engine/src/engine.rs`). The drain happens before the WAL lock, so it does not block writers. Hot snapshots are now safe under sustained load.
 >
 > **Backup-automation note:** host-side automation (cron/sidecar) invokes `xyzdb-cli admin snapshot …`, so the `xyzdb-cli` binary must be available on the host. If your runtime image ships only `xyzdb-server`, build the CLI first (`cargo build --release -p xyzdb-cli`) before scheduling the job.
 
@@ -223,7 +223,7 @@ If the snapshot is taken while compaction is disabled on any tree (`xyzdb-cli ad
 
 ### Retention
 
-v0.8.x does NOT auto-prune old snapshots. Operators manage `snapshots/<name>/` directories manually:
+xyzDB does NOT auto-prune old snapshots. Operators manage `snapshots/<name>/` directories manually:
 
 ```bash
 ls -la /var/lib/xyzdb/snapshots/
@@ -336,7 +336,7 @@ echo "STATS" | xyzdb-cli --host 127.0.0.1 --port 2505 | jq '{
 }'
 ```
 
-Read the breakdown. Most v0.8.x OOM cases trace to one of:
+Read the breakdown. Most OOM cases trace to one of:
 
 - `block_cache.weight_bytes` close to the derived cache ceiling (`--memory-budget-mb`/4) AND working set + bloom + index + memtable approach the cgroup limit → memory budget too aggressive.
 - `mem_active_bytes` per keyspace large AND `levels.l0` ≥ 8 → flush back-pressure not draining; reads + writes piling on the active memtable.
@@ -537,7 +537,7 @@ Sample twice, ~10 s apart:
 **Mitigate**.
 
 - For "fsync failing" (read-only fs / disk full): fix the underlying filesystem, then the next group-commit cycle ticks the timestamp normally (no restart needed in many cases — verify `last_successful_sync_ts_ms` advances within 5 s of the fix).
-- For "thread dead": stop and restart the server. Recovery is via WAL replay (the engine re-opens, replays unflushed writes, resumes group commit). The drop chain on graceful shutdown is best-effort; cf. §9 Decommission for the actual semantic in v0.8.x.
+- For "thread dead": stop and restart the server. Recovery is via WAL replay (the engine re-opens, replays unflushed writes, resumes group commit). The drop chain on graceful shutdown is best-effort; cf. §9 Decommission for the actual semantic.
 - For systemic durability concern, switch to `--durability batched` temporarily (timer-based fsync at `--batch-interval ms`; trades RPO for liveness). Restart required.
 
 **Do NOT**.
@@ -547,9 +547,9 @@ Sample twice, ~10 s apart:
 
 **Escalate** when `last_successful_sync_ts_ms` stays flat > 30 s OR the fix-up does not restart the heartbeat within 60 s. Ticket: full `/stats.sync_thread`, last 50 lines of stderr, `mount` + `dmesg`, and the configured `--durability` mode.
 
-### 6.6 Snapshot under load — resolved in v0.8.2
+### 6.6 Snapshot under load — resolved before 1.0
 
-The non-deterministic `hard_link` failure when creating a hot snapshot under sustained writes (a race between disabling compaction and capturing live SST paths) is **fixed in v0.8.2**: snapshot creation now drains in-flight compaction before capturing the SST paths (see §4 Backup). On v0.8.2+ you should not see it; if a snapshot still fails, treat it as a filesystem problem (permissions, disk full, read-only mount) — check `df -h <data dir>`, `ls -la <data>/snapshots/`, and `dmesg | tail`.
+The non-deterministic `hard_link` failure when creating a hot snapshot under sustained writes (a race between disabling compaction and capturing live SST paths) is **fixed**, and the fix predates 1.0, so every released build carries it: snapshot creation drains in-flight compaction before capturing the SST paths (see §4 Backup). You should not see it; if a snapshot still fails, treat it as a filesystem problem (permissions, disk full, read-only mount) — check `df -h <data dir>`, `ls -la <data>/snapshots/`, and `dmesg | tail`.
 
 ### 6.7 Disk space not reclaimed after a crash — run COMPACT
 
@@ -643,9 +643,9 @@ Rationale: an HDD A/B (observe vs enforce) showed the ladder trade-off was net-n
 
 Migration: scripts that set `--xydisk-mode` must drop the flag (the binary rejects unknown flags). Consumers parsing `scheduler.compaction_blocked_us_total` from `/stats` must drop that field. The remaining `/stats.scheduler.*` fields are unchanged.
 
-### ANALYZE memory — resolved in v0.8.1
+### ANALYZE memory — resolved before 1.0
 
-`ANALYZE "<lobe>"` (xyTalk verb, also exposed as `xyzdb-cli admin analyze <lobe>`) samples up to 10 000 records per lobe and computes per-field cardinality + suggestions. Earlier builds inflated VmRSS ~3.2× for ~3 min because dictionary creation re-scanned the whole lobe (`prefix()` materialised every record). **v0.8.1 removed the re-scan** (`crates/engine/src/analyze.rs`): the unique values now come from the same sampled records the profile is built from, in a single streaming pass — the burst is gone, and the cost is bounded by the sample size, not the lobe size.
+`ANALYZE "<lobe>"` (xyTalk verb, also exposed as `xyzdb-cli admin analyze <lobe>`) samples up to 10 000 records per lobe and computes per-field cardinality + suggestions. Earlier builds inflated VmRSS ~3.2× for ~3 min because dictionary creation re-scanned the whole lobe (`prefix()` materialised every record). **The re-scan was removed before 1.0** (`crates/engine/src/analyze.rs`), so every released build is on the cheap path: the unique values now come from the same sampled records the profile is built from, in a single streaming pass — the burst is gone, and the cost is bounded by the sample size, not the lobe size.
 
 A small residue (~60 MB per run, asymptotic toward glibc arena steady state, not unbounded) can remain. Light guidance:
 
@@ -662,7 +662,7 @@ A release may still ask for a **one-time action after** the upgrade without chan
 
 ### 8.1 What "in-place" means
 
-A v0.8.x → v0.8.x+1 upgrade is allowed when **both** on-disk format bytes match across versions:
+An upgrade between two releases is allowed when **both** on-disk format bytes match across them:
 
 | Constant | Current | Source of truth |
 |---|---:|---|
@@ -673,14 +673,14 @@ Relative to the 0.8.x line, the 0.9.x on-disk format widened `SpatialKey` from 2
 
 If a binary opens a data dir whose manifest version does not match its compiled `MANIFEST_VERSION`, it returns `Error::IncompatibleFormat { found, expected }` with a clear log line and the engine refuses to start. **There is no in-place format migration** — the operator path across a format bump is re-ingestion (recreate the dataset from source). The separate `xyzdb-cli admin migrate` verb is not a format converter; it rehashes gravity keys (see §8.5).
 
-### 8.2 In-place upgrade procedure (v0.8.x → v0.8.x+1)
+### 8.2 In-place upgrade procedure
 
 ```bash
 # 1. Drain at the load balancer (stop sending new connections to this instance).
 
 # 1b. Wait ~30 s post-drain and verify compaction is settled — snapshotting
 #     a quiet engine sidesteps the historical snapshot-under-load race
-#     (fixed in v0.8.2, see §6.6); this is belt-and-suspenders. Sampling
+#     (fixed before 1.0, see §6.6); this is belt-and-suspenders. Sampling
 #     compact_ok twice ~30 s apart should show no advancement on any
 #     keyspace before snapshotting.
 echo "STATS" | xyzdb-cli ... | jq '{
@@ -694,7 +694,7 @@ echo "STATS" | xyzdb-cli ... | jq '{
 XYZDB_TOKEN=$(cat /etc/xyzdb/token) \
   xyzdb-cli admin snapshot create "pre-upgrade-$(date +%Y%m%d-%H%M)"
 
-# 3. Stop the running server. Since v0.8.10 SIGTERM/Ctrl-C trigger a
+# 3. Stop the running server. SIGTERM/Ctrl-C trigger a
 #    graceful drain + flush + clean-shutdown marker (cf. §9); a SIGKILL
 #    still recovers via WAL replay on next start.
 sudo systemctl stop xyzdb        # or: kill <pid>
@@ -720,7 +720,7 @@ echo "/ready" | xyzdb-cli --host 127.0.0.1 --port 2505
 
 WAL replay during step 5 takes the same wall-clock as a normal cold start (single-digit seconds per GiB of unflushed WAL on SSD). You can monitor it via the boot log; the engine emits per-keyspace `flushed_seqno` once replay completes.
 
-### 8.3 Rollback to v0.8.x-1
+### 8.3 Rollback to the previous release
 
 The new binary failed `/ready` or surfaced incorrect behaviour after step 7. Procedure:
 
@@ -749,7 +749,7 @@ The snapshot captured every write acknowledged before the snapshot lock acquired
 
 Symptom: `Error::IncompatibleFormat { found: <N>, expected: <M> }` on engine open.
 
-This happens when the binary's compiled `MANIFEST_VERSION` (or `GHOST_META_FORMAT`) does not match what's on disk. In v0.8.x this should NOT occur on a patch upgrade — the constants are pinned. If it does occur:
+This happens when the binary's compiled `MANIFEST_VERSION` (or `GHOST_META_FORMAT`) does not match what's on disk. It should NOT occur on a patch upgrade — the constants are pinned within a minor line, and 1.0 → 1.1 has no format change. If it does occur:
 
 - Confirm the binary version: `xyzdb-server --version`.
 - Confirm the data dir was not touched by a different release: `ls -la /var/lib/xyzdb/spatial/MANIFEST` (file headers contain the version byte at offset 0, dump with `xxd | head -1`).
@@ -768,16 +768,16 @@ This happens when the binary's compiled `MANIFEST_VERSION` (or `GHOST_META_FORMA
 
 How to take an xyzDB instance out of service cleanly, with the data dir in a state that either re-opens cleanly elsewhere or can be discarded safely.
 
-### 9.1 Shutdown semantics in v0.8.x (read this first)
+### 9.1 Shutdown semantics (read this first)
 
 xyzDB's "shutdown contract" lives in two `Drop` implementations:
 
 - [`Engine::drop`](crates/engine/src/engine/mod.rs#L325) — persists the field registry and total-writes counter.
 - [`TurbaEngine::drop`](crates/turba-engine/src/engine.rs#L1294) — signals the WAL janitor to stop and joins it, syncs the journal best-effort, then for each of the five keyspaces (`spatial`, `identity`, `dictionary`, `ghosts`, `vectors`) seals the active memtable, notifies background workers, and joins them. The bg workers flush sealed memtables and run any pending compactions before exiting.
 
-Since v0.8.10 the server binary installs a signal handler (`shutdown_signal()` in `crates/server/src/main.rs`) and the accept loop races `listener.accept()` against a shutdown signal via `tokio::select!`. On signal, strictly in order and never in parallel with accept: stop accepting, drain in-flight connections (tracked in a `JoinSet`, bounded to 5 s), abort any stragglers, then run `engine.graceful_shutdown()` (writes the clean-shutdown marker, seals + flushes every tree, reclaims the WAL — the same work `Drop` would do), then `std::process::exit(0)`. Concretely:
+The server binary installs a signal handler (`shutdown_signal()` in `crates/server/src/main.rs`) and the accept loop races `listener.accept()` against a shutdown signal via `tokio::select!`. On signal, strictly in order and never in parallel with accept: stop accepting, drain in-flight connections (tracked in a `JoinSet`, bounded to 5 s), abort any stragglers, then run `engine.graceful_shutdown()` (writes the clean-shutdown marker, seals + flushes every tree, reclaims the WAL — the same work `Drop` would do), then `std::process::exit(0)`. Concretely:
 
-| Signal | What happens in v0.8.x | Clean shutdown runs? |
+| Signal | What happens | Clean shutdown runs? |
 |---|---|---|
 | `SIGINT` (Ctrl-C) | Caught: graceful drain + flush + clean marker, then `exit(0)` | Yes |
 | `SIGTERM` (Unix) | Caught: graceful drain + flush + clean marker, then `exit(0)` | Yes |
@@ -787,7 +787,7 @@ Under `SIGINT`/`SIGTERM` the engine exits clean, so the next start replays an em
 
 Subprocess-based crash-recovery tests (`crates/turba-engine/tests/crash_recovery.rs`) exercise the `SIGKILL` path with real kills and assert correctness; the clean `SIGTERM` path has an end-to-end test (`crates/server/tests/graceful_shutdown_e2e.rs`, Unix) that asserts `exit(0)` and that the clean-shutdown marker was written.
 
-> **Finding H9 (resolved in v0.8.10)** — the graceful signal handler is now wired: `SIGINT`/`SIGTERM` trigger the drain + drop chain instead of relying on WAL replay.
+> **Graceful signal handling is wired** (before 1.0, so every released build has it): `SIGINT`/`SIGTERM` trigger the drain + drop chain instead of relying on WAL replay.
 
 ### 9.2 Decommission procedure
 
@@ -802,7 +802,7 @@ kubectl scale deploy xyzdb --replicas=0      # or: remove from LB
 # 1b. Wait ~30 s post-drain and verify compaction is settled — same
 #     precaution as §8.2. Snapshot is reliable on a quiet engine; under
 #     in-flight compaction it could historically return the I/O error
-#     symptom from §6.6 (fixed in v0.8.2).
+#     symptom from §6.6 (fixed before 1.0).
 echo "STATS" | xyzdb-cli ... | jq '{
   compact_ok: (.keyspaces | map_values(.compact.compact_ok)),
   l0: (.keyspaces | map_values(.levels.l0))
@@ -816,7 +816,7 @@ echo "STATS" | xyzdb-cli ... | jq '{
 XYZDB_TOKEN=$(cat /etc/xyzdb/token) \
   xyzdb-cli admin snapshot create "decommission-$(date +%Y%m%d-%H%M)"
 
-# 3. Stop the server. SIGTERM is the conventional signal; since v0.8.10
+# 3. Stop the server. SIGTERM is the conventional signal;
 #    it triggers a graceful drain + flush + clean-shutdown marker
 #    (see §9.1 above), so the next start replays an empty WAL. A SIGKILL
 #    still recovers via WAL replay on the next start of any instance
@@ -874,11 +874,11 @@ sudo shred -uvz /etc/xyzdb/token
 
 TLS certs and keys (`--tls-cert`, `--tls-key`) follow your existing PKI rotation/disposal policy; xyzDB does not own that lifecycle.
 
-### 9.5 What is NOT a decommission contract in v0.8.x
+### 9.5 What is NOT a decommission contract
 
 - **Bounded, not unbounded, in-flight drain.** On `SIGINT`/`SIGTERM` the server drains in-flight connections for up to 5 s, then aborts stragglers before flushing. Committed writes are WAL-durable, so an aborted straggler loses only its in-flight response, not acknowledged data. Under `batched` or `async` durability a signalled stop can still lose up to `--batch-interval ms` of not-yet-fsync'd writes; `--durability durable` fsyncs per group commit and bounds the loss to < 100 ms.
 - **No "preserve cache state across restart".** The block cache, page cache, and bloom-load warm-up are rebuilt from scratch on next open. Plan first-query latency accordingly when re-pointing a fresh instance at the data dir.
-- **Graceful signal handling is present (v0.8.10).** `SIGINT`/`SIGTERM` run `engine.graceful_shutdown()` (drain → flush → clean marker → `exit(0)`), not just the `Drop` chain on normal return. `SIGKILL` still bypasses everything and recovers via WAL replay.
+- **Graceful signal handling is present.** `SIGINT`/`SIGTERM` run `engine.graceful_shutdown()` (drain → flush → clean marker → `exit(0)`), not just the `Drop` chain on normal return. `SIGKILL` still bypasses everything and recovers via WAL replay.
 
 ---
 
