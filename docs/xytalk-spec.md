@@ -937,6 +937,7 @@ AUTOANCHOR APPLY "field" IN "lobe"
 
 ```text
 -- Common ordering: declare + bulk load + apply
+LOBE "clientes"                          -- the lobe must exist before any declaration (§2.1)
 ANCHOR "rfc" UNIQUE IN "clientes"
 PUT BATCH IN "clientes" [...]            -- 1.5 M rows in ≤10K chunks (§2.4)
 AUTOANCHOR APPLY "rfc" IN "clientes"     -- populates dictionary for all 1.5 M
@@ -995,7 +996,19 @@ SHOW THROTTLE
 
 **Behavior:**
 - `SHOW SCAN STATS` — recent scan patterns observed by `ScanTelemetry`, with hit counts, rolling avg latency, and `AutoGhostCandidate` markers. Used to inspect what auto-ghost is about to promote (see §5).
-- `SHOW PROFILE "lobe"` — pinned fields, learned scan patterns for this lobe, active ghosts (with `[projected]` marker indicating which fields are stored on the ghost entry), and the searchable vector field: `Vector: <field> dim <n>` (or `dim unknown` before the first embedding fixes it), or `Vector: (none)` when the lobe has none.
+- `SHOW PROFILE "lobe"` — everything the lobe declares, one line each, in this order:
+
+  ```text
+  Profile for 'p':
+    Gravity: scope
+    Pinned: a
+    Vector: emb dim unknown
+    Satellite: kind
+    Learned: (no scan patterns yet)
+    Ghosts: (none)
+  ```
+
+  `Gravity:` names the primary co-location axis (§2.2.1) and is the one to read first — a query pinning it reads one bucket, one that does not sweeps the lobe. `Satellite:` names the sub-gravity axis (§2.2.2), which is a sub-range *of* that bucket and only means something alongside a declared gravity. `Vector:` is `<field> dim <n>`, or `dim unknown` before the first embedding fixes the dimension (§2.20). Each of the three reads `(none)` when the lobe declares it not. `Pinned:` lists pinned fields (§2.18) — a projection, unrelated to anchors, which do not appear here at all. `Learned:` is the scan patterns observed for this lobe and `Ghosts:` the active ghosts, with a `[projected]` marker for fields stored on the ghost entry.
 - `SHOW THROTTLE` — current write throttle state across all lobes (Healthy / Degraded / Critical / Paused) and the active throttle profile (`balanced`, `transactional`, `analytical`, `bulk`, `maintenance` — see §6).
 
 #### 2.20 VECTOR / NEAREST — Searchable embeddings (v0.8)
@@ -1026,7 +1039,8 @@ VECTOR <field> IN "<lobe>"
 **Examples:**
 
 ```text
--- Declare the searchable embedding
+-- Declare the searchable embedding (the lobe must exist first, §2.1)
+LOBE "memories"
 VECTOR embedding IN "memories"
 
 -- Top-8 most similar within a gravity bucket, query bound out-of-band (phrase form)
@@ -1234,6 +1248,7 @@ first_step | second_step [| third_step ...]
 | `SCAN GHOST \| AGGREGATE` | Aggregation | O(n) |
 | `FIND \| NEAREST ...` | Records (top-k) | O(bucket) |
 | `SCAN \| NEAREST ...` | Records (top-k) | O(bucket) |
+| `SCAN \| NEAREST ... \| SHAPE {…}` | Records (top-k, projected) | O(bucket) — the fused plan is chosen whenever the pipeline *starts* with `SCAN \| NEAREST`, so appending a read-only step does not shrink the candidate set |
 | `FIND \| FOLLOW ... TO ...` | Records (cross-entity) | O(n) |
 | `SCAN \| FOLLOW ... TO ...` | Records (cross-entity) | O(n) |
 
@@ -1281,7 +1296,7 @@ Any other predicate disqualifies the ghost from PreComputed; the router falls ba
 | `SCAN ... WHERE _type = "Credit" AND status = "active" \| GROUP BY rfc \| AGGREGATE sum(monto), count()` | `Primary` | `status` is neither ghost-constant nor a group key |
 | `SCAN ... WHERE _type = "Credit" AND rfc > "M" \| GROUP BY rfc \| AGGREGATE sum(monto), count()` | `Primary` | range op on group key, not Eq |
 
-This guarantees the pre-computed group entries returned to the caller satisfy every `WHERE` clause — not just those covered by the ghost definition. Range operators on group keys (`!=`, `<`, `<=`, `>`, `>=`, `IN`) are post-v0.6 scope (deferred until a richer PreComputed lookup design exists).
+This guarantees the pre-computed group entries returned to the caller satisfy every `WHERE` clause — not just those covered by the ghost definition. Range operators on group keys (`!=`, `<`, `<=`, `>`, `>=`, `IN`) disqualify the ghost and route to `Primary`. Widening that set is possible but **not planned**: a query the ghost cannot answer exactly is cheaper to answer from `Primary` than to answer wrongly from the ghost.
 
 **Routing is transparent** — the query text is the same regardless of which source serves it. Operators inspect routing decisions via `SHOW SCAN STATS` (§2.19) and the `/stats` endpoint.
 
@@ -1303,7 +1318,6 @@ The cardinality count is **exact** — `xyzdb-engine/src/analyze.rs` uses a `Has
 xyzdb-server \
     --path ./data/xyzdb \
     --port 2505 \
-    --bind 0.0.0.0 \
     --throttle-profile balanced \
     --memory-budget-mb 8192 \
     --storage-profile ssd \
@@ -1311,8 +1325,20 @@ xyzdb-server \
     --batch-interval 100
 ```
 
+The example omits `--bind` on purpose: the default is `127.0.0.1`, and a non-loopback
+bind **refuses to start** unless `--auth-token` (or the explicit
+`--insecure-allow-no-auth`) is given. `--bind 0.0.0.0` on its own does not run.
+
+This table covers the flags the rest of this document refers to; it is not the full
+set — `xyzdb-server --help` is.
+
 | Flag | Values | Default | Description |
 |------|--------|---------|-------------|
+| `--bind` | address | `127.0.0.1` | Listen address. A non-loopback value without `--auth-token` refuses to start |
+| `--auth-token` | path to file | none | File holding the bearer token; when set, every connection must authenticate except the `/health` and `/ready` probes (`PROTOCOL.md` §4, §11) |
+| `--tls-cert` / `--tls-key` | paths | none | Serve TLS 1.3. Both or neither; the token travels in the clear without them |
+| `--nearest-budget-ms` | ms | 3000 | Wall-clock airbag for a single `NEAREST`. A latency wall, never a recall wall (§2.20) |
+| `--record-cache-size` | MiB | 0 (disabled) | Enables `INCACHE` / `OUTCACHE` (§2.10); without it both statements error. `--hot-cache-size` is a deprecated alias |
 | `--throttle-profile` | transactional, analytical, balanced, maintenance, bulk | balanced | Query throttling |
 | `--memory-budget-mb` | MB | cgroup limit, else 1024 | The single memory knob: block cache is derived from it, and ingest backpressure bounds memtable growth against it. (`--cache-size` is a deprecated, hidden override.) |
 | `--storage-profile` | ssd, hdd | ssd | HDD: larger blocks, more bloom bits |
@@ -1352,11 +1378,11 @@ A side `/stats` HTTP-style endpoint on the same TCP port emits a JSON snapshot o
 | count() only | No count(field), count(DISTINCT). `count(*)` is an accepted alias of `count()` |
 | CONTAINS only on List | No substring search on Text, no key search on Map |
 | Ghost routing AND-only | OR/NOT queries always scan primary keyspace |
-| PreComputed group-key Eq only | Non-`Eq` operators on `GROUP BY` fields disqualify the ghost from PreComputed (router falls back to Primary). Range support is post-v0.6 grammar scope. |
-| Cursor + ORDER BY rejected | Paginated sort needs a richer payload — post-v0.6 grammar scope. |
-| Cursor + ghost routing rejected | Engine forces `ScanSource::Primary` when a cursor is present — post-v0.6 grammar scope. |
+| PreComputed group-key Eq only | Non-`Eq` operators on `GROUP BY` fields disqualify the ghost from PreComputed and route to Primary (§5). Widening the set is not planned — a query the ghost cannot answer exactly is cheaper from Primary than wrong from the ghost. |
+| Cursor + ORDER BY rejected | A cursor names a position in the spatial keyspace, which is not a position in a sorted result. A different payload variant would be needed; none is planned (§2.6). |
+| Cursor + ghost routing rejected | Same reason: a spatial-key position says nothing about where to resume inside a ghost's own order. The engine forces `ScanSource::Primary` when a cursor is present (§2.6). |
 | Null = Null is TRUE | Differs from SQL standard (see Null Semantics section) |
-| 256 MB max response | Frame size limit for monolithic TCP protocol |
+| 16 MiB max frame | `MAX_FRAME_SIZE` bounds every length-prefixed field, request and response (`PROTOCOL.md` §10). Page with `CURSOR` (§2.6) or request a chunked format (`PROTOCOL.md` §9) for more. |
 
 ### Resolved in V4 (no longer limitations)
 
