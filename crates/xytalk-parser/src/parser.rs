@@ -10,6 +10,39 @@ use nom::{
 };
 use xyzdb_core::error::XyzError;
 
+/// Turn a `nom` failure into a message meant for whoever typed the statement.
+///
+/// `format!("{e}")` on a `nom::Err` renders the inner error's `Debug`, which put
+/// `Parsing Error: Error { input: "AUTOLINK", code: Tag }` in front of users: it
+/// names a combinator instead of saying what was expected, and its shape is a
+/// dependency's internal type, so a `nom` upgrade could change it. Statements
+/// that have a hand-written message still produce it — this only replaces the
+/// fallback, so the leak cannot come back through a site nobody rewrote.
+///
+/// Giving every argument parser an expected-token message is the real fix and is
+/// tracked in `KNOWN-ISSUES.md`; this closes the leak in the meantime.
+fn parse_failure(e: nom::Err<nom::error::Error<&str>>) -> XyzError {
+    let rest = match &e {
+        nom::Err::Error(inner) | nom::Err::Failure(inner) => inner.input.trim(),
+        nom::Err::Incomplete(_) => "",
+    };
+    if rest.is_empty() {
+        return XyzError::Parse(
+            "statement ends where more input was expected — check the statement's \
+             grammar in docs/xytalk-spec.md"
+                .into(),
+        );
+    }
+    // Enough to locate the problem, bounded so a pasted payload cannot echo back
+    // in full.
+    let shown: String = rest.chars().take(40).collect();
+    let ellipsis = if rest.chars().count() > 40 { "…" } else { "" };
+    XyzError::Parse(format!(
+        "could not parse from: '{shown}{ellipsis}' — check the statement's grammar \
+         in docs/xytalk-spec.md"
+    ))
+}
+
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /// Parse a single xyTalk statement. Supports pipelines with `|`.
@@ -113,31 +146,31 @@ fn parse_pipeline_step(input: &str) -> Result<PipelineStep, XyzError> {
     let upper = trimmed.to_uppercase();
 
     if upper.starts_with("PULL") {
-        let (_, pull) = parse_pull_step(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, pull) = parse_pull_step(trimmed).map_err(|e| parse_failure(e))?;
         Ok(PipelineStep::Pull(pull))
     } else if upper.starts_with("SET") {
-        let (_, set) = parse_set_step(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, set) = parse_set_step(trimmed).map_err(|e| parse_failure(e))?;
         Ok(PipelineStep::Set(set))
     } else if upper.starts_with("DELETE") {
-        let (_, del) = parse_delete_step(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, del) = parse_delete_step(trimmed).map_err(|e| parse_failure(e))?;
         Ok(PipelineStep::Delete(del))
     } else if upper.starts_with("AGGREGATE") {
-        let (_, funcs) = parse_aggregate(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, funcs) = parse_aggregate(trimmed).map_err(|e| parse_failure(e))?;
         Ok(PipelineStep::Aggregate(funcs))
     } else if upper.starts_with("GROUP") {
-        let (_, fields) = parse_group_by(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, fields) = parse_group_by(trimmed).map_err(|e| parse_failure(e))?;
         Ok(PipelineStep::GroupBy(fields))
     } else if upper.starts_with("NEAREST") {
-        let (_, near) = parse_nearest(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, near) = parse_nearest(trimmed).map_err(|e| parse_failure(e))?;
         Ok(PipelineStep::Nearest(near))
     } else if upper.starts_with("FOLLOW") {
-        let (_, f) = parse_follow(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, f) = parse_follow(trimmed).map_err(|e| parse_failure(e))?;
         Ok(PipelineStep::Follow(f))
     } else if upper.starts_with("TAKE") || upper.starts_with("TOP") {
-        let (_, top) = parse_take(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, top) = parse_take(trimmed).map_err(|e| parse_failure(e))?;
         Ok(PipelineStep::Top(top))
     } else if upper.starts_with("SHAPE") {
-        let (_, shape) = parse_shape_step(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, shape) = parse_shape_step(trimmed).map_err(|e| parse_failure(e))?;
         Ok(PipelineStep::Shape(shape))
     } else {
         Err(XyzError::Parse(format!(
@@ -207,13 +240,13 @@ fn parse_single_statement(input: &str) -> Result<Statement, XyzError> {
     let upper = trimmed.to_uppercase();
 
     if upper.starts_with("PUT BATCH") || upper.starts_with("PUT  BATCH") {
-        let (_, stmt) = parse_put_batch(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, stmt) = parse_put_batch(trimmed).map_err(|e| parse_failure(e))?;
         Ok(Statement::PutBatch(stmt))
     } else if upper.starts_with("PUT") {
-        let (_, stmt) = parse_put(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, stmt) = parse_put(trimmed).map_err(|e| parse_failure(e))?;
         Ok(Statement::Put(stmt))
     } else if upper.starts_with("FIND") {
-        let (rest, stmt) = parse_find(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (rest, stmt) = parse_find(trimmed).map_err(|e| parse_failure(e))?;
         // P1: FIND is AND-only by design (anchor/gravity fast path). OR/NOT needs
         // a traversal — teach the fix instead of silently dropping the rest of the
         // predicate, which is what the un-consumed tail used to do.
@@ -237,13 +270,13 @@ fn parse_single_statement(input: &str) -> Result<Statement, XyzError> {
         }
         Ok(Statement::Find(stmt))
     } else if upper.starts_with("PULL") {
-        let (_, stmt) = parse_pull_full(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, stmt) = parse_pull_full(trimmed).map_err(|e| parse_failure(e))?;
         Ok(Statement::Pull(stmt))
     } else if upper.starts_with("SCAN GHOST") {
-        let (_, stmt) = parse_scan_ghost(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, stmt) = parse_scan_ghost(trimmed).map_err(|e| parse_failure(e))?;
         Ok(Statement::ScanGhost(stmt))
     } else if upper.starts_with("SCAN") {
-        let (_, stmt) = parse_scan(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, stmt) = parse_scan(trimmed).map_err(|e| parse_failure(e))?;
         // P5: ORDER BY must be bounded — an unbounded sort is a footgun that used
         // to parse and fail later in the engine. Fail here with a message that
         // teaches the fix.
@@ -256,20 +289,19 @@ fn parse_single_statement(input: &str) -> Result<Statement, XyzError> {
         }
         Ok(Statement::Scan(stmt))
     } else if upper.starts_with("CREATE GHOST") {
-        let (_, stmt) = parse_create_ghost(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, stmt) = parse_create_ghost(trimmed).map_err(|e| parse_failure(e))?;
         Ok(Statement::CreateGhost(stmt))
     } else if upper.starts_with("REFRESH GHOST") {
-        let (_, name) =
-            parse_refresh_ghost(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, name) = parse_refresh_ghost(trimmed).map_err(|e| parse_failure(e))?;
         Ok(Statement::RefreshGhost(name))
     } else if upper.starts_with("DROP GHOST") {
-        let (_, name) = parse_drop_ghost(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, name) = parse_drop_ghost(trimmed).map_err(|e| parse_failure(e))?;
         Ok(Statement::DropGhost(name))
     } else if upper.starts_with("SET") {
-        let (_, stmt) = parse_set_full(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, stmt) = parse_set_full(trimmed).map_err(|e| parse_failure(e))?;
         Ok(Statement::Set(stmt))
     } else if upper.starts_with("DELETE") {
-        let (_, stmt) = parse_delete_full(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, stmt) = parse_delete_full(trimmed).map_err(|e| parse_failure(e))?;
         // P7: DELETE requires a WHERE — a WHERE-less DELETE used to empty the
         // whole target silently. Teach the explicit total-delete verb.
         if stmt.filter_expr.is_none() {
@@ -281,10 +313,10 @@ fn parse_single_statement(input: &str) -> Result<Statement, XyzError> {
         }
         Ok(Statement::Delete(stmt))
     } else if upper.starts_with("PURGE") {
-        let (_, stmt) = parse_purge(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, stmt) = parse_purge(trimmed).map_err(|e| parse_failure(e))?;
         Ok(Statement::Purge(stmt))
     } else if upper.starts_with("FETCH") {
-        let (_, stmt) = parse_fetch(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, stmt) = parse_fetch(trimmed).map_err(|e| parse_failure(e))?;
         // FETCH requires a WHERE (the shared co-location key); a keyless FETCH
         // would pull whole lobes. Teach the fix rather than surprise the caller.
         if stmt.filter_expr.is_none() {
@@ -306,10 +338,10 @@ fn parse_single_statement(input: &str) -> Result<Statement, XyzError> {
         }
         Ok(Statement::Fetch(stmt))
     } else if upper.starts_with("LINK") {
-        let (_, stmt) = parse_link(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, stmt) = parse_link(trimmed).map_err(|e| parse_failure(e))?;
         Ok(Statement::Link(stmt))
     } else if upper.starts_with("ANALYZE") {
-        let (_, name) = parse_analyze(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, name) = parse_analyze(trimmed).map_err(|e| parse_failure(e))?;
         Ok(Statement::Analyze(name))
     } else if let Some(rest) = upper.strip_prefix("BULKMODE") {
         let rest = rest.trim();
@@ -335,38 +367,37 @@ fn parse_single_statement(input: &str) -> Result<Statement, XyzError> {
             Ok(Statement::Migrate(Some(name)))
         }
     } else if upper.starts_with("PIN") && !upper.starts_with("PIPELINE") {
-        let (_, stmt) = parse_pin(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, stmt) = parse_pin(trimmed).map_err(|e| parse_failure(e))?;
         Ok(Statement::Pin(stmt))
     } else if upper.starts_with("UNPIN") {
-        let (_, stmt) = parse_unpin(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, stmt) = parse_unpin(trimmed).map_err(|e| parse_failure(e))?;
         Ok(Statement::Unpin(stmt))
     } else if upper.starts_with("AUTOANCHOR") {
-        let (_, stmt) =
-            parse_autoanchor_apply(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, stmt) = parse_autoanchor_apply(trimmed).map_err(|e| parse_failure(e))?;
         Ok(Statement::AutoAnchorApply(stmt))
     } else if upper.starts_with("ANCHOR") {
-        let (_, stmt) = parse_anchor(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, stmt) = parse_anchor(trimmed).map_err(|e| parse_failure(e))?;
         Ok(Statement::Anchor(stmt))
     } else if upper.starts_with("GRAVITY") {
-        let (_, stmt) = parse_gravity(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, stmt) = parse_gravity(trimmed).map_err(|e| parse_failure(e))?;
         Ok(Statement::Gravity(stmt))
     } else if upper.starts_with("VECTOR") {
-        let (_, stmt) = parse_vector(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, stmt) = parse_vector(trimmed).map_err(|e| parse_failure(e))?;
         Ok(Statement::Vector(stmt))
     } else if upper.starts_with("SATELLITE") {
-        let (_, stmt) = parse_satellite(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, stmt) = parse_satellite(trimmed).map_err(|e| parse_failure(e))?;
         Ok(Statement::Satellite(stmt))
     } else if upper.starts_with("LOBE") {
-        let (_, stmt) = parse_lobe(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, stmt) = parse_lobe(trimmed).map_err(|e| parse_failure(e))?;
         Ok(Statement::Lobe(stmt))
     } else if upper.starts_with("INCACHE") {
-        let (_, stmt) = parse_incache(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, stmt) = parse_incache(trimmed).map_err(|e| parse_failure(e))?;
         Ok(Statement::InCache(stmt))
     } else if upper.starts_with("OUTCACHE") {
-        let (_, lobe) = parse_outcache(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, lobe) = parse_outcache(trimmed).map_err(|e| parse_failure(e))?;
         Ok(Statement::OutCache(lobe))
     } else if upper.starts_with("SHOW") {
-        let (_, stmt) = parse_show(trimmed).map_err(|e| XyzError::Parse(format!("{e}")))?;
+        let (_, stmt) = parse_show(trimmed).map_err(|e| parse_failure(e))?;
         Ok(Statement::Show(stmt))
     } else {
         Err(XyzError::Parse(format!(

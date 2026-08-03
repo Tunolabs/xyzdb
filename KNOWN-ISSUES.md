@@ -179,41 +179,38 @@ one that does not.
 
 ---
 
-## Grammar — errors a human cannot read
+## Grammar — an error that does not say what was expected
 
-### A recognised verb with a bad argument returns the parser's internal error
+### A bad argument to a recognised verb gets a generic parse error, not an expected-token one
 
-**What.** When the *verb* is unknown, the error is clean: `FROBNICATE "x"` gives
-`Unknown command: 'FROBNICATE'`. When the verb parses but its argument does not, the
-raw `nom` combinator error reaches the client instead:
+**What.** When the *verb* is unknown, the error names it: `FROBNICATE "x"` gives
+`Unknown command: 'FROBNICATE'`. Many statements also have specific messages, and they
+are good ones — a WHERE-less `DELETE` names `PURGE`, a `FIND` with `OR` points at
+`SCAN`, `ORDER BY` without `LIMIT` says so. But when the verb parses and its *argument*
+does not, and no specific message exists for that spot, you get a generic one:
 
 ```text
-SHOW BANANAS   →  Parse error: Parsing Error: Error { input: "BANANAS", code: Tag }
-SHOW           →  Parse error: Parsing Error: Error { input: "", code: Tag }
-SCAN           →  Parse error: Parsing Error: Error { input: "", code: TakeWhile1 }
+SHOW BANANAS   →  could not parse from: 'BANANAS' — check the statement's grammar in docs/xytalk-spec.md
+SHOW           →  statement ends where more input was expected — check the statement's grammar in docs/xytalk-spec.md
 ```
 
-`code: Tag` and `code: TakeWhile1` name combinators inside the parser. They tell the
-caller nothing about what was expected, and an agent or a UI surfacing them shows the
-user a Rust `Debug` struct.
+It says *where* parsing stopped, never *what was expected there*.
 
-**Not universal, which is the confusing part.** Several statements do have
-hand-written messages and they are good ones — `FIND "x" WHERE` gives `unexpected
-trailing input in FIND: 'WHERE'`, a WHERE-less `DELETE` names `PURGE`, a `FIND` with
-`OR` points at `SCAN`. The gap is the fallback: wherever no hand-written message
-exists, `nom`'s error is formatted through `Debug` and shipped.
+**What it costs you.** For an unfamiliar statement you compare against the grammar in
+`docs/xytalk-spec.md` rather than being told the missing token. The wire `code` is
+`PARSE_ERROR` either way (`PROTOCOL.md` §8), so a client keying off `code` is
+unaffected.
 
-**What it costs you.** A typo in an argument produces an error that cannot be acted on
-without reading the parser source. The error *code* on the wire is still
-`PARSE_ERROR`, so a client keying off `code` is unaffected (`PROTOCOL.md` §8); it is
-the human-readable `error` string that is unusable.
+**Already closed, and worth stating so it is not re-reported.** These errors used to
+render `nom`'s `Debug` — `Parsing Error: Error { input: "BANANAS", code: Tag }` — which
+named a combinator, told the caller nothing, and would have changed shape on a `nom`
+upgrade. Fixed in 1.1.0: one wrapper (`parse_failure` in `xytalk-parser`) produces the
+messages above, and it replaced **all 35** formatting sites, so the leak cannot return
+through one nobody rewrote. Statement-specific messages still win wherever they exist.
 
-**Workaround.** Compare against the statement's grammar in `docs/xytalk-spec.md`; the
-`input:` field does at least name the token where parsing stopped.
-
-**Why it is filed rather than fixed.** Doing it properly means giving each statement's
-argument parser an expected-token message, which is a pass over the parser, not a
-patch. It is not a correctness defect and nothing silently succeeds.
+**Why the rest is filed rather than fixed.** Expected-token messages mean giving every
+argument parser its own — a pass over the parser, not a patch. Nothing silently
+succeeds and no result is wrong.
 
 ---
 
