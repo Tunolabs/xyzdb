@@ -139,7 +139,23 @@ up_engine(){  # $1=engine $2=mem $3=memswap $4=cpus $5=cache  -> 0 ready / 1 not
   docker rm -f "$c" >/dev/null 2>&1 || true
   if [ -n "${STORAGE_ROOT:-}" ]; then                 # AWS bind mount: /mnt/ssd|/mnt/hdd
     case "$STORAGE_ROOT" in ""|/|/mnt) echo "FATAL: unsafe STORAGE_ROOT='$STORAGE_ROOT'" >&2; return 1;; esac
-    src="$STORAGE_ROOT/$e"; mkdir -p "$src"; find "$src" -mindepth 1 -delete 2>/dev/null || true
+    # Same defect as run_envelope_full.sh had: the engine container writes this
+    # bind-mounted dir as ROOT, so this delete silently fails from the second cell
+    # onwards when the harness runs as a normal user — and `|| true` meant the cell
+    # then measured a dirty datadir. Delete with root when the plain path cannot,
+    # and refuse to continue if the dir is still not empty: xyzDB has no
+    # drop_lobe, so a non-empty datadir makes the measurement meaningless rather
+    # than merely noisy.
+    src="$STORAGE_ROOT/$e"; mkdir -p "$src"
+    find "$src" -mindepth 1 -delete 2>/dev/null || true
+    if [ -n "$(ls -A "$src" 2>/dev/null)" ]; then
+      docker run --rm -v "$src:/wipe" busybox:latest \
+        find /wipe -mindepth 1 -delete >/dev/null 2>&1 || true
+    fi
+    if [ -n "$(ls -A "$src" 2>/dev/null)" ]; then
+      echo "FATAL: could not empty $src; a cell on a dirty datadir measures nothing" >&2
+      return 1
+    fi
   else                                                # Mac default: docker named volume
     src="bench_$e"; docker volume rm "$src" >/dev/null 2>&1 || true
   fi

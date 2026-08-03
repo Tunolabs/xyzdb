@@ -105,7 +105,26 @@ prep_vol(){ local v=$1 dd=$2
   case "$v" in bench_*) : ;; *) echo "FATAL: bad vol '$v'" >&2; return 1;; esac
   if [ -n "$STORAGE_ROOT" ]; then
     case "$STORAGE_ROOT" in ""|/|/mnt) echo "FATAL: unsafe STORAGE_ROOT='$STORAGE_ROOT'" >&2; return 1;; esac
-    rm -rf "$STORAGE_ROOT/$v"; mkdir -p "$STORAGE_ROOT/$v"; MNT="-v $STORAGE_ROOT/$v:$dd"
+    # The engine container writes this bind-mounted dir as ROOT, so a plain delete
+    # run as the invoking user cannot clear it from the SECOND cell onwards — which
+    # is why a single run on a fresh box never showed it. It used to fail with
+    # "Permission denied", the failure was not checked, and the cell went on to
+    # measure a dirty datadir, writing a record that read
+    # `crash_or_oom_during_load`: the engine blamed for a permission problem in the
+    # harness. Delete with root when the plain path cannot, then ASSERT the result.
+    find "$STORAGE_ROOT/$v" -mindepth 1 -delete 2>/dev/null || true
+    if [ -d "$STORAGE_ROOT/$v" ] && [ -n "$(ls -A "$STORAGE_ROOT/$v" 2>/dev/null)" ]; then
+      docker run --rm -v "$STORAGE_ROOT/$v:/wipe" busybox:latest \
+        find /wipe -mindepth 1 -delete >/dev/null 2>&1 || true
+    fi
+    mkdir -p "$STORAGE_ROOT/$v"
+    if [ -n "$(ls -A "$STORAGE_ROOT/$v" 2>/dev/null)" ]; then
+      echo "FATAL: could not empty $STORAGE_ROOT/$v — xyzDB has no drop_lobe, so a cell" >&2
+      echo "       starting on a dirty datadir measures nothing meaningful. Left as-is" >&2
+      echo "       on purpose: inspect it rather than re-running into the same wall." >&2
+      return 1
+    fi
+    MNT="-v $STORAGE_ROOT/$v:$dd"
   else
     docker volume rm "$v" >/dev/null 2>&1; docker volume create "$v" >/dev/null; MNT="-v $v:$dd"
   fi; }
