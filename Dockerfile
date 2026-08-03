@@ -90,7 +90,11 @@ FROM gcr.io/distroless/cc-debian12
 # is set by whoever builds for publication.
 ARG TARGETARCH
 ARG XYZ_IMAGE_VARIANT=""
-LABEL org.xyzdb.image-variant="${XYZ_IMAGE_VARIANT:-$TARGETARCH}"
+# `$TARGETARCH` is empty under the classic builder (see the arch note above), so
+# this label used to come out as an empty string — a stamp that says nothing while
+# looking like it says something. The fallback is now explicit, and the
+# authoritative fact lives in the label below.
+LABEL org.xyzdb.image-variant="${XYZ_IMAGE_VARIANT:-runtime-selected}"
 # On x86_64 this is a DUAL-ISA image: it carries the baseline and the AVX2 engine
 # and selects per host. Do not tag it `x86-v3` — that name says the image only
 # runs where v3 does, which is what this stopped being.

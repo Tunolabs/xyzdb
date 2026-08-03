@@ -28,6 +28,7 @@
 //! with no dependencies, compiled at the baseline ISA so it is guaranteed to
 //! start wherever the container starts.
 
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::Command;
@@ -62,46 +63,76 @@ fn cpu_has_v3() -> bool {
     false
 }
 
+/// Present AND executable. Checking only `exists()` was not enough: with the v3
+/// binary present but unusable, the launcher tried it, `exec` failed with EACCES
+/// and it exited instead of falling back — verified by mounting /dev/null over
+/// the v3 path, which is exactly the shape of a half-built image.
+fn usable(p: &str) -> bool {
+    std::fs::metadata(p)
+        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
 fn main() -> ! {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
-    // Order matters: prefer v3 when the CPU allows it AND that build is in the
-    // image, and fall through to the baseline otherwise. An image that ships only
-    // one of the two (the arm64 case) still works without a special case.
-    let (chosen, why) = if cpu_has_v3() && Path::new(V3).exists() {
-        (V3, "CPU implements x86-64-v3 (AVX2/FMA/BMI2)")
-    } else if Path::new(V2).exists() {
-        let why = if cfg!(target_arch = "x86_64") && !cpu_has_v3() {
-            "CPU does not implement x86-64-v3; using the portable baseline build"
-        } else {
-            "single build in this image"
-        };
-        (V2, why)
+    // Preference order, best first. Each candidate carries why it would be
+    // chosen, so the message explains the decision rather than announcing it.
+    let mut candidates: Vec<(&str, &str)> = Vec::new();
+    if cpu_has_v3() {
+        candidates.push((V3, "CPU implements x86-64-v3 (AVX2/FMA/BMI2)"));
+        candidates.push((V2, "fell back after the v3 build could not be executed"));
+    } else if cfg!(target_arch = "x86_64") {
+        candidates.push((
+            V2,
+            "CPU does not implement x86-64-v3; using the portable baseline build",
+        ));
     } else {
+        candidates.push((V2, "single build in this image"));
+    }
+
+    let mut tried = 0;
+    for (path, why) in &candidates {
+        if !usable(path) {
+            continue;
+        }
+        tried += 1;
+        // Say which one, on stderr, before handing over. The selection being
+        // automatic is no reason for it to be invisible: an operator comparing
+        // two hosts needs to see that one took the baseline path.
         eprintln!(
-            "xyzdb-launch: neither {V3} nor {V2} is present in this image — it was \
-             built wrong; refusing to guess"
+            "xyzdb-launch: exec {} ({why})",
+            Path::new(path)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+        );
+        // exec, not spawn: the engine must be PID 1's process image so signals
+        // and exit codes reach it unchanged. `graceful_shutdown` is wired to
+        // SIGTERM (OPERATIONS.md §9), and a wrapper that forwarded signals
+        // imperfectly would silently turn a clean drain into a WAL replay.
+        //
+        // Past this call the process IS the engine, so anything below only runs
+        // when exec itself failed.
+        let err = Command::new(path).args(&args).exec();
+        eprintln!("xyzdb-launch: exec {path} failed: {err}");
+    }
+
+    if tried == 0 {
+        eprintln!(
+            "xyzdb-launch: no usable engine binary in this image (looked for {V3} then \
+             {V2}) — it was built wrong; refusing to guess"
         );
         std::process::exit(78); // EX_CONFIG
-    };
-
-    // Say which one, on stderr, before handing over. The selection being
-    // automatic is no reason for it to be invisible: an operator comparing two
-    // hosts needs to see that one took the baseline path.
-    eprintln!(
-        "xyzdb-launch: exec {} ({})",
-        Path::new(chosen)
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy(),
-        why
-    );
-
-    // exec, not spawn: the engine must be PID 1's process image so signals and
-    // exit codes reach it unchanged. `graceful_shutdown` is wired to SIGTERM
-    // (OPERATIONS.md §9), and a wrapper that forwarded signals imperfectly would
-    // silently turn a clean drain into a WAL replay on the next start.
-    let err = Command::new(chosen).args(&args).exec();
-    eprintln!("xyzdb-launch: exec {chosen} failed: {err}");
+    }
+    // Every candidate was present and every exec failed. Not a configuration
+    // problem any more: something is wrong with the binaries themselves.
+    eprintln!("xyzdb-launch: every engine build in this image failed to exec");
     std::process::exit(126);
 }
+
+// What this CANNOT do, stated so nobody relies on it: if the feature detection
+// above ever says yes on a CPU that then faults, the fault arrives as SIGILL
+// inside the engine, after a successful exec. There is no fallback from that —
+// the detection IS the protection. The fallback here covers a bad image, not a
+// bad prediction.
