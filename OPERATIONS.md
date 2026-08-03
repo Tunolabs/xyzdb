@@ -1,6 +1,6 @@
 # xyzDB Operations
 
-Operator runbook for xyzDB 1.0. This is the document an operator opens when running xyzDB in an internal deployment, without needing to read `docs/architecture.md` end-to-end.
+Operator runbook for xyzDB 1.1. This is the document an operator opens when running xyzDB in an internal deployment, without needing to read `docs/architecture.md` end-to-end.
 
 > **Status:** current as of 1.1 (2026-08-01). Covers single-node deployment, configuration, health checks, backup/restore, observability, and the operational caveats that still apply. 1.1 is an in-place upgrade from 1.0 (§8) and adds two things an operator sees: the `xyzdb_invariant_*` / `xyzdb_recovered_from_wal` series (§5), and a one-time `REFRESH GHOST` if you run aggregate ghosts over lobes that take upserts (§8).
 
@@ -12,7 +12,7 @@ xyzDB ships as a **single-process daemon** (`xyzdb-server`) that owns one engine
 
 | Surface | First byte | What sees it |
 |---|---|---|
-| Wire V1/V2/V3 (text/binary/bulk-load) | `0x01` / `0x02` / `0x03` | xyzdb-cli, xyzdb-python SDK, xyzdb-mcp `--connect`, xyzdb-bench |
+| Wire V1/V2/V3/V4 (text/binary/bulk-load/bound-params) | `0x01` / `0x02` / `0x03` / `0x04` | xyzdb-cli, the `xyzdb` clients (Python, TypeScript, Rust), xyzdb-mcp `--connect`, xyzdb-bench |
 | Bearer-token auth preamble (`AUTH_MAGIC`) | `0x41` (`A`) | Same wire clients when `--auth-token` is set |
 | HTTP/1.1 GET (operator surface, /stats poll) | `G` / `H` / `P` / `O` / `D` / `T` / `C` | Browsers, curl, Prometheus (via a `/metrics` sidecar — see §5) |
 
@@ -79,7 +79,7 @@ xyzDB is **single-host only**. There is no cluster mode, no replica, no shard ro
 Operationally this means:
 
 - HA = run two independent xyzDB instances and serve writes to one; restoring the other is a snapshot copy + `xyzdb-cli admin snapshot restore` (see §4 Backup). Hot snapshots are safe under sustained load (the compaction-drain fix — see §4).
-- Read scale-out = add more cores/RAM to the single host (T6 preset = 2C/8G is the production target).
+- Read scale-out = add more cores/RAM to the single host. The shape this is tuned and benchmarked against is **2 vCPU / 8 GB**; smaller envelopes work (the engine derives its budgets from the cgroup limit) but that is the reference.
 - Cross-host coordination = none; the operator surface on each instance is independent.
 
 ---
@@ -103,6 +103,8 @@ Operationally this means:
 | `--record-cache-size` | `0` (MB) | In-memory RecordCache budget for `INCACHE` / `OUTCACHE`. `0` disables. Deprecated alias: `--hot-cache-size`. |
 | `--wal-path` | `<path>/journal.wal` | Override the WAL location. Must share a filesystem with `--path` (snapshot hard-link orchestration assumes it). |
 | `--l0-batch` | profile default | Advanced: override the L0 compaction batch size. Unset uses the storage-profile default. |
+| `--nearest-budget-ms` | `3000` (ms) | Wall-clock airbag for a single `NEAREST`. A latency wall, never a recall wall — and what expiry does depends on the path: a **bounded** `NEAREST` returns the best-scoring rows found so far with a `budget_stop` object, while an **unbounded** scoring scan aborts with an error. `0` disables. The partial's contract is `docs/xytalk-spec.md` §2.20. |
+| `--block-cache-lane-admission` | `disabled` | Lane-aware block-cache admission. Off by default; see §7 for what it changes and why it is opt-in. |
 | `--auto-ghost-min-hits` | `5` | Hit threshold within the 10 min window for auto-ghost promotion. |
 | `--auto-ghost-min-latency-ms` | `20.0` | Average latency threshold. Pass `1e9` to effectively disable auto-ghost. |
 | `--tls-cert` | (none) | PEM cert chain. Set together with `--tls-key`; both empty = plain TCP with WARN. |

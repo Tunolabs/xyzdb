@@ -99,10 +99,13 @@ struct Args {
     #[arg(long, alias = "hot-cache-size", default_value_t = 0)]
     record_cache_size: u64,
 
-    /// NEAREST time-budget airbag in ms (default 3000; 0 disables). A bucket scan
-    /// past this aborts with a clear error instead of hanging. Calibrated to the
-    /// worst dimensioned bucket (1536d/250k: p99 ~1505ms, max ~2502ms) with margin;
-    /// guards runaway buckets, not normal queries.
+    /// NEAREST time-budget airbag in ms (default 3000; 0 disables). It is a
+    /// LATENCY wall, never a recall wall, and what happens on expiry depends on
+    /// the path: a bounded NEAREST returns the best-scoring rows found so far
+    /// with a `budget_stop` object describing the cut, while an unbounded
+    /// scoring scan still aborts with a clear error instead of hanging.
+    /// Calibrated to the worst dimensioned bucket (1536d/250k: p99 ~1505ms,
+    /// max ~2502ms) with margin; guards runaway buckets, not normal queries.
     #[arg(long, default_value_t = 3000)]
     nearest_budget_ms: u64,
 
