@@ -19,6 +19,7 @@ Minor, not patch: new grammar, new response fields and new `STATS` / `/metrics` 
 - **`budget_stop` on a truncated `NEAREST`** (`examined` / `candidates` / `found` / `strategy`): the counts at the latency-airbag cut, plus which traversal produced the partial. Present only on that frame; every other response is byte-identical. `strategy` defines two values but this release emits only `"score_order"` — the field ships ahead of the second traversal so clients key off the fact instead of assuming it. Spec §2.20.
 - **Invariant guards are observable state.** `STATS` gains `invariant_guards` and `recovered_from_wal`; `/metrics` gains the matching series. Correctness signals, not capacity metrics — any non-zero is an engine bug.
 - **The satellite axis is discoverable.** `SHOW PROFILE` reports it and the MCP `describe_lobe` tool gained a `satellite` field, so an agent can see the axis it is meant to query along.
+- **`SHOW PROFILE` reports the gravity axis, and `describe_lobe` exposes it.** The profile listed `Pinned`, `Vector`, `Satellite` and `Learned` — every declaration except the primary one — so an agent reading a lobe over MCP could discover the satellite axis without discovering the bucket it subdivides. The line is additive with the same three-state shape as `Vector:`/`Satellite:`, the MCP parser tolerates an engine that does not emit it, and `gravity` is hoisted to the top level of the description beside `vector` and `satellite`.
 
 ### Fixed
 
@@ -29,13 +30,10 @@ Minor, not patch: new grammar, new response fields and new `STATS` / `/metrics` 
 - **A ghost-routed read returned records without the declared vector.** V5 keeps the searchable vector in its own column; the ghost's point-read did not re-attach it. Since ghosts are materialised by the engine from scan telemetry, the same query returned different fields before and after one was built, with nothing written in between — and an unfused `NEAREST` over that scan returned zero rows, which reads as "no matches". No action needed: nothing on disk is wrong, the vector was always in its column.
 - **A longer pipeline no longer shrinks a `NEAREST`'s candidate set.** The fused plan was gated on the pipeline being exactly `SCAN | NEAREST`, so appending a step (`| SHAPE {id}`) dropped the query into the generic loop, where the scan materialises one 1000-record page and `NEAREST` ranks inside it. The fused plan is now chosen whenever the pipeline *starts* with those two steps.
 
-### Added
-
-- **`SHOW PROFILE` reports the gravity axis, and `describe_lobe` exposes it.** The profile listed `Pinned`, `Vector`, `Satellite` and `Learned` — every declaration except the primary one — so an agent reading a lobe over MCP could discover the satellite axis without discovering the bucket it subdivides. The line is additive with the same three-state shape as `Vector:`/`Satellite:`, the MCP parser tolerates an engine that does not emit it, and `gravity` is hoisted to the top level of the description beside `vector` and `satellite`.
-
 ### Changed
 
 - **A truncated `NEAREST` refuses a mutating or aggregating next step.** When the latency airbag cuts the candidate set, a following `SET`, `DELETE` or `AGGREGATE` now errors instead of running: those results cannot carry `budget_stop`, so the write or the total would silently cover only the part that was scored. Read-only steps still compose and the flag travels with them.
+- **`COMPACT` / `ANALYZE` / `BULKMODE` / `MIGRATE` are permanent aliases; no retirement is planned.** The v0.2.5.1 deprecation announced removal in v0.3.0, and the server kept announcing it on every invocation through 1.1.0 — an operator reading that log plans a migration that never arrives. The recommendation is worth keeping and stays: prefer `xyzdb-cli admin <verb>` so housekeeping stays out of application query paths. The deadline is withdrawn. The statements keep parsing, the `tracing::warn` now names the preferred form without a version, and `--help` and spec §2.21 say the same. Nothing to migrate.
 
 ## [1.0.0] — 2026-07-30 (1.0 launch)
 

@@ -244,7 +244,7 @@ Restart the MCP client, then prompt the agent with *"List the lobes you can see 
   - **Tier 1 — Quickstart**: the 8 verbs covered above (LOBE, ANCHOR, PUT, PUT BATCH, FIND, SCAN, SET, DELETE).
   - **Tier 2 — Common**: LINK (relationships), INCACHE/OUTCACHE (caching), AGGREGATE, SHOW (introspection).
   - **Tier 3 — Power user**: PULL (graph traversal), CREATE GHOST (manual materialised views), PIN/UNPIN, AUTOANCHOR APPLY, SHOW (tuning).
-  - **Tier 4 — Operator**: COMPACT / ANALYZE / BULKMODE / MIGRATE (deprecated as language; use `xyzdb-cli admin <verb>`).
+  - **Tier 4 — Operator**: COMPACT / ANALYZE / BULKMODE / MIGRATE (prefer `xyzdb-cli admin <verb>`; the language form stays as a permanent alias).
 - **`architecture.md`** — how the engine works internally. Useful before tuning or extending.
 - **`releases/v1.1.0.md`** — the current release notes.
 

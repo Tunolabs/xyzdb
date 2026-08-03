@@ -29,10 +29,10 @@ struct Args {
 #[derive(Subcommand)]
 enum Command {
     /// Run an admin command against the server. Admin verbs are the
-    /// successor surface for COMPACT / ANALYZE / BULKMODE / MIGRATE,
-    /// which remain accepted as language statements in v0.2.5.x but
-    /// emit a deprecation warning on the server (Hueco 1). v0.3 will
-    /// drop the language-statement form; admin commands stay here.
+    /// preferred surface for COMPACT / ANALYZE / BULKMODE / MIGRATE, so
+    /// that housekeeping stays out of application query paths. Those
+    /// statements also remain accepted by the language as permanent
+    /// aliases; the server logs a notice pointing here.
     Admin {
         #[command(subcommand)]
         verb: AdminVerb,
@@ -200,9 +200,9 @@ async fn run_repl(addr: &str) {
 /// Single-shot admin command: connect, send the equivalent xyTalk,
 /// print response, exit. The CLI does NOT implement any admin logic
 /// itself — it is a thin operator-grade wrapper that routes to the
-/// running server's existing admin paths. v0.3 will retire the
-/// language-statement form (`COMPACT`, `ANALYZE "x"`, etc.) and this
-/// subcommand will become the canonical entry point.
+/// running server's existing admin paths. This is the canonical entry
+/// point; the language-statement form (`COMPACT`, `ANALYZE "x"`, …) stays
+/// accepted as a permanent alias.
 async fn run_admin(addr: &str, verb: AdminVerb) {
     // v0.4 cp 3.2.2: snapshot restore is offline — no server contact.
     if let AdminVerb::Snapshot {

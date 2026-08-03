@@ -119,7 +119,7 @@ xyTalk statements are organized by **usage tier** so a casual reader meets the b
 - **Tier 1 — Quickstart** — primitive with ≥1 deterministic fast path AND zero operational knowledge required. The verbs every user starts with.
 - **Tier 2 — Common** — primitive a user discovers on demand (relate, cache, introspect, aggregate).
 - **Tier 3 — Power user** — requires understanding of one of: ghost lifecycle, anchor population semantics, manual pinning, override of automatic routing.
-- **Tier 4 — Operator** — administrative operation that should not appear in application code paths; deprecated as language statements in v0.2.5.1+ and exposed via `xyzdb-cli admin <verb>`.
+- **Tier 4 — Operator** — administrative operation that should not appear in application code paths; preferably run as `xyzdb-cli admin <verb>`, with the language form kept as a permanent alias (§2.21).
 
 ---
 
@@ -1059,15 +1059,15 @@ the scope, then re-run.
 
 ---
 
-### Tier 4 — Operator (deprecated as language)
+### Tier 4 — Operator (permanent aliases; prefer the CLI)
 
-Administrative operations that should not appear in application code paths. Deprecated as language statements in v0.2.5.1+; the engine accepts them for backward compatibility with existing drivers, benchmarks, and validation suites and emits a `tracing::warn` deprecation notice on every invocation. **They will be retired from the grammar in v0.3.0.**
+Administrative operations that should not appear in application code paths. The preferred surface is the `xyzdb-cli admin` subcommand (a thin wrapper that builds the equivalent xyTalk string and ships it over the standard V1 protocol — no new wire shape).
 
-The successor surface is the `xyzdb-cli admin` subcommand (a thin wrapper that builds the equivalent xyTalk string and ships it over the standard V1 protocol — no new wire shape).
+The language statements are **permanent aliases**: drivers, benchmarks and validation suites in the wild send them, and they keep parsing. The engine logs a `tracing::warn` on every invocation pointing at the CLI form. **No retirement is planned** — earlier versions of this section and of the warning itself announced removal in v0.3.0 and were still announcing it at 1.1.0.
 
 #### 2.21 ADMIN — COMPACT / ANALYZE / BULKMODE / MIGRATE
 
-**Deprecated language form** (still accepted in v0.2.5.x):
+**Language form** (accepted, permanent alias):
 
 ```
 COMPACT
@@ -1077,7 +1077,7 @@ MIGRATE "lobe"
 MIGRATE
 ```
 
-**Replacement — `xyzdb-cli admin`:**
+**Preferred form — `xyzdb-cli admin`:**
 
 ```bash
 xyzdb-cli admin compact                  # COMPACT (every keyspace)
@@ -1093,15 +1093,15 @@ xyzdb-cli admin migrate --all            # MIGRATE (every lobe)
 - `BULKMODE ON | OFF` — toggles bulk-load mode (relaxed durability + write conversion to sequential).
 - `MIGRATE "<lobe>" | (no arg)` — runs format migration on a single lobe or every lobe.
 
-**Deprecation notice on every invocation** (server-side `tracing::warn`):
+**Notice on every invocation** (server-side `tracing::warn`, quoted from `engine/dispatch.rs`):
 
 ```
-Statement {NAME} is deprecated as language statement;
-use 'xyzdb-cli admin {name}' in v0.3+.
-Will be removed from grammar in v0.3.0.
+Statement {NAME} is an administrative operation; prefer
+'xyzdb-cli admin {name}' so it stays out of application query paths.
+The statement form keeps working — no removal is planned.
 ```
 
-**Note**: The deprecation does **not** apply to `INCACHE` / `OUTCACHE` (§2.10) — those are operator-grade *workload tuning* expected to drive query routing from inside the language, not administrative housekeeping.
+**Note**: the recommendation does **not** apply to `INCACHE` / `OUTCACHE` (§2.10) — those are operator-grade *workload tuning* expected to drive query routing from inside the language, not administrative housekeeping.
 
 #### 2.22 SCRUB — On-Disk Integrity Verify
 
@@ -1111,7 +1111,7 @@ SCRUB
 
 **Behavior:**
 - **Read-only.** Verifies on-disk integrity across every keyspace — SST block checksums plus the `MANIFEST` — and reports any corruption it finds. It **alerts, never repairs**: SCRUB never mutates data. Safe to run on a live database.
-- Not part of the v0.2.5.1 deprecation set (unlike `COMPACT` / `ANALYZE` / `BULKMODE` / `MIGRATE` above); it is a current operator-grade verb.
+- Unlike `COMPACT` / `ANALYZE` / `BULKMODE` / `MIGRATE` above, `SCRUB` has no `xyzdb-cli admin` counterpart and emits no notice; the language form is the only form.
 
 ---
 
@@ -1354,7 +1354,7 @@ A side `/stats` HTTP-style endpoint on the same TCP port emits a JSON snapshot o
 | Unbounded SCAN walked entire lobe | Default `LIMIT 1000` cap + `LIMIT > 10000` rejected (§2.6) |
 | `WHERE` rejected on standalone `SET` / `DELETE` / `LINK` | Accepted on all three forms (§2.7 / §2.8 / §2.9) |
 | `INCACHE` / `OUTCACHE` undocumented + bare-keyword silently OK | Documented (§2.10); bare keywords rejected at parse time |
-| `COMPACT` / `ANALYZE` / `BULKMODE` / `MIGRATE` mixed into the language | Deprecated; use `xyzdb-cli admin <verb>` (§2.21) |
+| `COMPACT` / `ANALYZE` / `BULKMODE` / `MIGRATE` mixed into the language | Prefer `xyzdb-cli admin <verb>`; the language form stays as a permanent alias (§2.21) |
 
 ### Resolved / changed in xyTalk v1
 

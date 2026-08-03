@@ -443,15 +443,21 @@ fn stmt_touches_gravity_data(stmt: &Statement) -> bool {
     )
 }
 
-/// v0.2.5.1 — emit a deprecation warning for admin statements that
-/// will move to `xyzdb-cli admin <verb>` in v0.3+. The statement still
-/// executes normally (no breakage for existing drivers + benchmarks +
-/// validation suites). The warning is server-side only via `tracing`;
-/// no QueryResult shape change.
+/// Point administrative statements at their supported surface,
+/// `xyzdb-cli admin <verb>`, without promising a retirement.
+///
+/// The language forms are **permanent aliases**: drivers, benchmarks and
+/// validation suites in the wild send them, and nothing is gained by
+/// breaking those. Earlier versions of this warning announced removal in
+/// v0.3.0 and kept announcing it through 1.1.0, which is worse than no
+/// warning at all — an operator plans a migration that never arrives. The
+/// recommendation is worth keeping; the deadline was not.
+///
+/// Server-side `tracing` only; no `QueryResult` shape change.
 fn warn_admin_statement_deprecated(stmt_upper: &str, cli_verb: &str) {
     tracing::warn!(
-        "Statement {stmt_upper} is deprecated as language statement; \
-         use 'xyzdb-cli admin {cli_verb}' in v0.3+. \
-         Will be removed from grammar in v0.3.0."
+        "Statement {stmt_upper} is an administrative operation; \
+         prefer 'xyzdb-cli admin {cli_verb}' so it stays out of application \
+         query paths. The statement form keeps working — no removal is planned."
     );
 }

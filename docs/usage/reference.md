@@ -141,9 +141,9 @@ SCAN "creditos" WHERE rfc = "X" LIMIT 1000 CURSOR "AQEAAQ..."
 
 Auto-ghosts (Ephemeral / Promoted classes) appear without `CREATE GHOST` when hot patterns cross the trigger threshold. They look identical to manual ghosts in `SHOW GHOSTS` but have non-null `ttl_seconds`.
 
-### 2.6 Admin verbs (v0.2.5.1)
+### 2.6 Admin verbs
 
-Operator-grade commands move out of xyTalk and into the `xyzdb-cli admin` subcommand. As of 1.0 the language statements still execute, emitting a `tracing::warn` deprecation that points to the `admin` subcommand; retiring them entirely is still pending.
+Operator-grade commands belong in the `xyzdb-cli admin` subcommand rather than in application query paths. The language statements also keep executing as permanent aliases, emitting a `tracing::warn` that points at the `admin` form. **No retirement is planned** — nothing to migrate.
 
 ```bash
 xyzdb-cli admin compact                  # COMPACT (every keyspace)
@@ -153,7 +153,7 @@ xyzdb-cli admin migrate <lobe>           # MIGRATE "<lobe>"
 xyzdb-cli admin migrate --all            # MIGRATE (every lobe)
 ```
 
-The CLI is a thin wrapper over the existing V1 protocol — same wire shape, same engine paths. New code should target the admin subcommand from v0.2.5.1 onwards. Existing drivers, validation suites, and external clients keep working under v0.2.5.x.
+The CLI is a thin wrapper over the existing V1 protocol — same wire shape, same engine paths. New code should target the admin subcommand; existing drivers, validation suites, and external clients that send the statements keep working indefinitely.
 
 `INCACHE` / `OUTCACHE` are NOT admin — they remain operator-grade *workload tuning* inside the language. See spec §2.10.
 
