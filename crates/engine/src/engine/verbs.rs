@@ -415,53 +415,79 @@ impl Engine {
         dictionary: &turba_engine::tree::Tree,
         lobes: &LobeRegistry,
     ) -> HashMap<String, Vec<String>> {
+        // PREFIX SCAN, not one point-get per lobe. A point lookup is bloom-gated,
+        // and a post-recovery SSTable can carry a bloom that disagrees with its data
+        // (KNOWN-ISSUES.md). Measured with a forged bloom: the previous loader
+        // brought a lobe up reporting `Pinned: (none)` — the declaration was gone.
+        //
+        // The UNIQUE constraint itself survived that, but for a different reason:
+        // the write path's duplicate check confirms a miss WITHOUT the bloom
+        // (`ops/put.rs`). That shield was added for the false negative in the
+        // duplicate check, and it happens to also cover the lost declaration on
+        // that one route. **That is architectural luck, not design** — anyone
+        // "simplifying" it on the belief that it only covers the duplicate-anchor
+        // case would silently remove the second half.
+        //
+        // A range scan never consults the bloom, so the declaration stops depending
+        // on either. Same MVCC snapshot as a point read, tombstones excluded.
+        let by_id: HashMap<u16, &str> = lobes.all().map(|(name, c)| (c.id, name)).collect();
         let mut result = HashMap::new();
-        for (name, config) in lobes.all() {
-            let mut key = Vec::with_capacity(4);
-            key.extend_from_slice(&PIN_PREFIX);
-            key.extend_from_slice(&config.id.to_be_bytes());
-            if let Ok(Some(val)) = dictionary.get(&key) {
-                let fields_opt: Option<Vec<String>> = if val.len() >= 3
-                    && val[0..2] == xyzdb_core::record::XYZDB_MAGIC
-                    && val[2] == 0x01
-                {
-                    postcard::from_bytes(&val[3..])
-                        .ok()
-                        .or_else(|| bincode::deserialize(&val).ok())
-                } else {
-                    bincode::deserialize(&val).ok()
-                };
-                if let Some(fields) = fields_opt
-                    && !fields.is_empty()
-                {
-                    result.insert(name.to_string(), fields);
-                }
-                continue;
-            }
 
-            // Legacy fallback: pins written pre-0.7.6 live under the key
-            // that ghost metadata also uses. Accept ONLY pin-shaped values
-            // (magic + 0x01) — a ghost meta (0x03) under the same key is
-            // not a pin — and migrate to the new prefix so the legacy slot
-            // stops being load-bearing. The legacy entry is left in place:
-            // deleting it here could erase a ghost meta racing this boot,
-            // and a stale pin-shaped value under the old key is inert.
-            let mut legacy_key = Vec::with_capacity(4);
-            legacy_key.extend_from_slice(&PIN_PREFIX_LEGACY);
-            legacy_key.extend_from_slice(&config.id.to_be_bytes());
-            if let Ok(Some(val)) = dictionary.get(&legacy_key)
-                && val.len() >= 3
-                && val[0..2] == xyzdb_core::record::XYZDB_MAGIC
-                && val[2] == 0x01
-                && let Some(fields) = postcard::from_bytes::<Vec<String>>(&val[3..]).ok()
-                && !fields.is_empty()
-            {
-                if let Err(e) = Self::persist_pinned(dictionary, config.id, &fields) {
-                    tracing::warn!("pin migration for lobe '{name}' failed: {e}");
-                }
-                result.insert(name.to_string(), fields);
+        // Value shape decides, never the key: a ghost meta (0x03) lives under the
+        // legacy prefix too, so accepting by position would read one as a pin list.
+        let as_pin_fields = |val: &[u8], allow_bincode: bool| -> Option<Vec<String>> {
+            if val.len() >= 3 && val[0..2] == xyzdb_core::record::XYZDB_MAGIC && val[2] == 0x01 {
+                postcard::from_bytes(&val[3..]).ok().or_else(|| {
+                    if allow_bincode {
+                        bincode::deserialize(val).ok()
+                    } else {
+                        None
+                    }
+                })
+            } else if allow_bincode {
+                bincode::deserialize(val).ok()
+            } else {
+                None
+            }
+        };
+
+        let lookup = |prefix: &[u8], allow_bincode: bool| -> Vec<(u16, Vec<String>)> {
+            let Ok(entries) = dictionary.prefix_iter(prefix) else {
+                return Vec::new();
+            };
+            let plen = prefix.len();
+            entries
+                .filter_map(|e| {
+                    let id = <[u8; 2]>::try_from(e.key.get(plen..)?).ok()?;
+                    let fields = as_pin_fields(&e.value, allow_bincode)?;
+                    (!fields.is_empty()).then(|| (u16::from_be_bytes(id), fields))
+                })
+                .collect()
+        };
+
+        for (id, fields) in lookup(&PIN_PREFIX, true) {
+            if let Some(name) = by_id.get(&id) {
+                result.insert((*name).to_string(), fields);
             }
         }
+
+        // Legacy fallback: pins written pre-0.7.6 live under the key ghost metadata
+        // also uses, so only pin-shaped values (magic + 0x01) count — `allow_bincode
+        // = false` keeps a bare bincode blob from being read as a pin there. Migrate
+        // to the new prefix so the legacy slot stops being load-bearing; the legacy
+        // entry is LEFT in place, because deleting it could erase a ghost meta
+        // racing this boot, and a stale pin-shaped value under the old key is inert.
+        for (id, fields) in lookup(&PIN_PREFIX_LEGACY, false) {
+            let Some(name) = by_id.get(&id) else { continue };
+            if result.contains_key(*name) {
+                continue; // the current prefix already answered for this lobe
+            }
+            if let Err(e) = Self::persist_pinned(dictionary, id, &fields) {
+                tracing::warn!("pin migration for lobe '{name}' failed: {e}");
+            }
+            result.insert((*name).to_string(), fields);
+        }
+
         result
     }
 

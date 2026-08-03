@@ -49,11 +49,11 @@ loaders brought the lobe up reporting `Vector: (none)`. The axis was gone, and
 nothing said so. `tests/spec_load_bloom_false_negative.rs` asserts both halves: that
 the forge really does blind lookups, and that the axes survive it.
 
-**Where it is still NOT closed.** Every remaining bloom-gated point lookup trusts the
-filter:
+**Where it is still NOT closed.** These bloom-gated point lookups still trust the
+filter, and none of them has been measured:
 
-- The pinned anchor fields and their legacy key, also loaded at boot. Same shape the
-  specs had, not yet converted.
+- **The pinned-field lists** and their legacy key, loaded at boot. Same shape the
+  specs had. Losing them loses which columns a read projects — not a constraint.
 - The duplicate check in `DECLARE ANCHOR`, and a ghost metadata load.
 - **The ghost's point-read of a source record** (`ghost/read.rs`). The sharpest of
   the three: its miss branch skips the record, so a false negative there **silently
@@ -61,10 +61,21 @@ filter:
   by the engine itself, so that exposure can appear without anyone writing a query
   differently.
 
-**Reachability, precisely.** Demonstrated for the boot loads — that is what the forged
-test showed before the fix. Not demonstrated for the paths above: whether a real
-post-recovery bloom reaches them has never been measured, and the live reproduction is
-flaky. What is no longer available is the comfortable argument that these keys are old
+**What was checked and is NOT exposed.** Listed because a defect file that names only
+the bad parts is easy to misread: "not mentioned" looks exactly like "nobody looked".
+
+- **`UNIQUE` anchor declarations.** They do not live in the keyspace at all —
+  `AnchorRegistry` is loaded from its own file under `meta/` (`engine/boot.rs`), so no
+  bloom, no point lookup, no range scan. A false negative cannot reach them.
+- **The `UNIQUE` constraint on the write path.** The duplicate check confirms a miss
+  without the bloom before trusting it (`ops/put.rs`), and that was verified under a
+  total forge: a `PUT` reusing an existing key still collides.
+
+**Reachability, precisely.** Demonstrated for the three declaration loads — that is
+what the forged test showed before the fix. **Not measured** for the paths listed
+above: whether a real post-recovery bloom reaches them is unknown, and the live
+reproduction is flaky. Unknown is not the same as safe, and neither is written here as
+though it were the other. What is no longer available is the comfortable argument that these keys are old
 and already compacted and therefore safe. It did not hold where it was checked.
 
 **What it costs you, and the workaround.** The window is an unclean restart. A
