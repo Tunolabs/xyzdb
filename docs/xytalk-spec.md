@@ -153,7 +153,15 @@ LOBE "creditos" HINT="Credit lifecycle: Credit + Installment + Payment + Collect
 
 **Behavior:**
 - Registers the lobe in the lobe registry. Idempotent: declaring the same lobe twice is a no-op.
-- A lobe is **also auto-created** on the first `PUT` that targets it, so explicit declaration is optional. Use `LOBE` when you want to attach a `HINT` or want the lobe to exist before any record is written (typical for migration scripts).
+- A lobe is **also auto-created** on the first `PUT` that targets it, so explicit declaration is optional *if you only ever write to it*.
+- **Every declaration statement requires the lobe to already exist**: `ANCHOR` (§2.2), `GRAVITY BY` (§2.2.1), `SATELLITE BY` (§2.2.2) and `VECTOR` (§2.20) all fail with `Lobe '<name>' not found` against a lobe that has never been created. Since two of those must be declared *before* the first write, the practical order for anything beyond a plain write is `LOBE` first:
+
+```text
+LOBE "clientes"
+ANCHOR "rfc" UNIQUE IN "clientes"
+GRAVITY BY rfc IN "clientes"
+PUT BATCH IN "clientes" [...]
+```
 - See §1 Lobes for the conceptual model (heterogeneous lobes, co-location by gravity).
 
 #### 2.2 ANCHOR — Declare Uniqueness
@@ -165,11 +173,12 @@ ANCHOR "field" UNIQUE IN "lobe"
 **Examples:**
 
 ```text
+LOBE "clients"                          -- required: the lobe must exist first
 ANCHOR "email" UNIQUE IN "clients"
-ANCHOR "rfc"   UNIQUE IN "clientes"
 ```
 
 **Behavior:**
+- **The lobe must already exist.** Against a lobe that was never created this fails with `Lobe '<name>' not found` — auto-creation happens on `PUT`, not on a declaration. Run `LOBE "name"` first (§2.1).
 - **Declarative.** Registers the uniqueness constraint and creates an empty entry in the dictionary keyspace. Subsequent inserts populate the dictionary on write; existing records are NOT indexed by this statement.
 - After declaration, `FIND "lobe" WHERE field = X` resolves through the dictionary keyspace in O(1).
 - Duplicate declarations of the same `(lobe, field)` are an error.
@@ -178,6 +187,7 @@ ANCHOR "rfc"   UNIQUE IN "clientes"
 **Common ordering — declare before bulk load:**
 
 ```text
+LOBE "clientes"
 ANCHOR "rfc" UNIQUE IN "clientes"
 PUT BATCH IN "clientes" [...]            -- 1.5 M rows in ≤10K chunks (§2.4); each PUT also writes the anchor entry
 ```
@@ -212,11 +222,13 @@ The explicit form of the co-location declaration. Where the `*` prefix (§1 Grav
 
 ```text
 -- Explicit keel, then plain-field writes co-locate without the * marker
+LOBE "creditos"                                                        -- the lobe must exist first
 GRAVITY BY rfc IN "creditos"
 PUT {rfc: "ACME-001", _type: "Credit", monto: 50000} IN "creditos"     -- co-located by rfc
 PUT {rfc: "ACME-001", _type: "Payment", amount: 2000} IN "creditos"    -- same bucket
 
 -- Composite keel required before a record marks two gravity fields
+LOBE "events"
 GRAVITY BY (tenant, region) IN "events"
 PUT {*tenant: "acme", *region: "eu", _type: "Login"} IN "events"
 ```
@@ -231,6 +243,7 @@ A third foundational axis, sibling to gravity (placement) and vector (search). W
 
 **Rules:**
 
+- **The lobe must already exist.** Like every other declaration, `SATELLITE BY` against a never-created lobe fails with `Lobe '<name>' not found`; and unlike them it must also run *before* the first write, so `LOBE "name"` first is the only working order (§2.1).
 - **One axis per lobe.** A lobe has at most one satellite field; re-declaring the same field is a no-op, declaring a different one is rejected. (The `sat` axis is a single `u16`; two fields cannot share it — a two-level split is a deferred design.)
 - **Declared on an empty lobe.** `SATELLITE BY` is refused if the lobe already holds records: declaring the axis over existing data would leave those records in the default sub-bucket, unreachable by a bounded per-satellite query. Declare it before the first write. (Re-packing existing data under a newly declared axis is a later, explicitly-justified path.)
 - **Leaving is free.** Retracting the axis never loses data or correctness: the parent-bucket scan already covers every satellite, so reads stay exact — only the bounded-scan speed-up is given up.
@@ -242,6 +255,7 @@ A third foundational axis, sibling to gravity (placement) and vector (search). W
 
 ```text
 -- Declare the sub-gravity axis on an empty lobe, up front
+LOBE "events"
 GRAVITY BY scope IN "events"
 SATELLITE BY kind IN "events"
 PUT {scope: "s1", kind: "click", n: 1} IN "events"

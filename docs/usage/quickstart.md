@@ -64,7 +64,7 @@ You'll get a `xyzdb> ` prompt. Everything below is typed at that prompt.
 LOBE "clients" HINT="Customer records"
 ```
 
-A **lobe** is a logical bucket for records that share a domain. Lobes are auto-created on first `PUT`, but explicit declaration with a `HINT` helps you (and your team) document intent before any record exists.
+A **lobe** is a logical bucket for records that share a domain. Lobes are auto-created on first `PUT`, so this line is optional if all you do is write — but every declaration (`ANCHOR`, `GRAVITY BY`, `SATELLITE BY`, `VECTOR`) requires the lobe to exist first, which is why it comes before Step 3. The `HINT` also documents intent for you and your team before any record exists.
 
 ### Step 3 — Add identity
 
