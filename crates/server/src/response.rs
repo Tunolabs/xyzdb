@@ -16,8 +16,12 @@ pub fn format_result(result: &QueryResult) -> String {
             first_lid,
             last_lid,
         } => {
+            // "written", not "inserted": under ON CONFLICT UPDATE a batch record
+            // whose anchor collides is updated rather than inserted, and `count`
+            // is the number of records the batch applied either way. Text output
+            // carries no compatibility guarantee (PROTOCOL.md §6).
             format!(
-                "OK: {count} records inserted (batch)\nFirst LID: {first_lid}\nLast LID: {last_lid}"
+                "OK: {count} records written (batch)\nFirst LID: {first_lid}\nLast LID: {last_lid}"
             )
         }
         QueryResult::Records(records) => {

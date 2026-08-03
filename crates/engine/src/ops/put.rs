@@ -700,9 +700,22 @@ pub fn execute_put_batch(engine: &Engine, stmt: PutBatchStmt) -> Result<QueryRes
     let _batch_anchor_guards = engine.lock_anchor_shards(&batch_anchor_dict_keys);
 
     // 2b-bulk (a): anchor dict_keys already claimed by an EARLIER record in
-    // THIS batch. The per-record dict.get cannot see in-flight records, so a
-    // repeated anchor within one batch is caught here, deterministically.
-    let mut seen_anchors: std::collections::HashSet<Vec<u8>> = std::collections::HashSet::new();
+    // THIS batch, mapped to the LID that claimed them. The per-record dict.get
+    // cannot see in-flight records, so a repeated anchor within one batch is
+    // caught here, deterministically — and under ON CONFLICT UPDATE the LID is
+    // what the later record upserts onto. One map instead of a separate `seen`
+    // set: two sources of truth for "who owns this anchor" is how the earlier
+    // defect stayed invisible.
+    let mut batch_anchor_lids: std::collections::HashMap<Vec<u8>, LID> =
+        std::collections::HashMap::new();
+
+    // Records whose anchor collided under ON CONFLICT UPDATE. Applied AFTER the
+    // insert batch commits, each through `execute_upsert` — the same path the
+    // single-statement upsert takes, so the ghost notify (P10), the RecordCache
+    // write-through and the V5 vector re-hoist all happen exactly once and in
+    // one place. Doing the merge inline here would have re-opened P10 through
+    // the batch door.
+    let mut pending_upserts: Vec<(LID, BTreeMap<String, Value>)> = Vec::new();
 
     // Snapshot the lobe's gravity spec once (constant across the batch): a
     // declared Normalized/Composite spec routes placement through the keel so
@@ -753,7 +766,14 @@ pub fn execute_put_batch(engine: &Engine, stmt: PutBatchStmt) -> Result<QueryRes
             engine.register_gravity_field(&stmt.lobe, gf_name)?;
         }
 
-        // Check anchors
+        // Check anchors. A collision under ON CONFLICT UPDATE resolves to the
+        // LID that owns the anchor value; the record is then upserted onto it
+        // instead of inserted. `conflict` carries that decision out of this
+        // loop: the earlier version used `continue` here, which continued the
+        // ANCHOR loop rather than the RECORD loop, so with one anchor field the
+        // record was inserted anyway and a UNIQUE anchor ended up with two
+        // records under it.
+        let mut conflict: Option<LID> = None;
         for anchor_name in &anchor_fields {
             if let Some(field_val) = fields.get(anchor_name) {
                 let val_str = value_to_anchor_string(field_val);
@@ -761,15 +781,19 @@ pub fn execute_put_batch(engine: &Engine, stmt: PutBatchStmt) -> Result<QueryRes
                 // 2b-bulk (a): a repeat of this anchor within the same batch —
                 // same DuplicateAnchor as the PUT path (the dict.get below
                 // cannot see the earlier in-flight record).
-                if !seen_anchors.insert(dict_key.clone()) && stmt.on_conflict.is_none() {
-                    return Err(XyzError::DuplicateAnchor {
-                        anchor: anchor_name.clone(),
-                        value: val_str.clone(),
-                        lobe: stmt.lobe.clone(),
-                        existing_lid: "batch".into(),
-                    });
+                if let Some(prior) = batch_anchor_lids.get(&dict_key) {
+                    if stmt.on_conflict.is_none() {
+                        return Err(XyzError::DuplicateAnchor {
+                            anchor: anchor_name.clone(),
+                            value: val_str.clone(),
+                            lobe: stmt.lobe.clone(),
+                            existing_lid: "batch".into(),
+                        });
+                    }
+                    conflict = Some(*prior);
+                    break;
                 }
-                if let Some(_existing) = engine
+                if let Some(existing) = engine
                     .turba
                     .dictionary
                     .get(&dict_key)
@@ -783,10 +807,20 @@ pub fn execute_put_batch(engine: &Engine, stmt: PutBatchStmt) -> Result<QueryRes
                             existing_lid: "batch".into(),
                         });
                     }
-                    // ON CONFLICT in batch: skip this record (simplified)
-                    continue;
+                    conflict = Some(LID::from_bytes(
+                        &<[u8; 16]>::try_from(existing.as_slice())
+                            .map_err(|_| XyzError::Internal("bad LID in dictionary".into()))?,
+                    ));
+                    break;
                 }
             }
+        }
+        if let Some(existing_lid) = conflict {
+            // ON CONFLICT UPDATE: the clause names the semantics, so update.
+            // Deferred until after the insert batch commits — an in-batch prior
+            // record must be readable before it can be merged into.
+            pending_upserts.push((existing_lid, fields));
+            continue;
         }
 
         // Entity hash: LINK > gravity > anchor > fallback. Route through the
@@ -875,12 +909,15 @@ pub fn execute_put_batch(engine: &Engine, stmt: PutBatchStmt) -> Result<QueryRes
             batch.put_dictionary(k.as_slice(), v.as_slice());
         }
 
-        // Anchor dictionary entries
+        // Anchor dictionary entries. The same map the collision check reads, so
+        // a later record in this batch sharing an anchor value resolves to this
+        // LID rather than to nothing.
         for anchor_name in &anchor_fields {
             if let Some(field_val) = record.fields.get(anchor_name) {
                 let val_str = value_to_anchor_string(field_val);
                 let dict_key = dictionary_key(lobe_id, anchor_name, &val_str);
                 batch.put_dictionary(dict_key.as_slice(), lid.to_bytes().as_slice());
+                batch_anchor_lids.insert(dict_key, lid);
             }
         }
 
@@ -903,6 +940,25 @@ pub fn execute_put_batch(engine: &Engine, stmt: PutBatchStmt) -> Result<QueryRes
             spatial_bytes,
             crate::ghost::WriteType::Insert,
         );
+    }
+
+    // 5b. Apply the ON CONFLICT UPDATE collisions, each through the single
+    // statement's own upsert path. Deliberately AFTER the commit above: a
+    // collision against a record inserted earlier in THIS batch has to be able
+    // to read it. `execute_upsert` re-hydrates, merges, commits WAL-durably,
+    // notifies ghosts (P10) and writes through the RecordCache — none of which
+    // an inline merge here would have done.
+    //
+    // Declared consequence, inherited from that path: it updates IN PLACE and
+    // does NOT re-bucket. A batch upsert that changes the gravity field or the
+    // satellite axis leaves the record in its old bucket, exactly as the
+    // single-statement form does (spec §2.2.2). Use SET to move a record.
+    //
+    // Atomicity, stated because it changed: the inserts are still one atomic
+    // batch. The updates are separate commits after it, so a mixed batch is not
+    // all-or-nothing across both halves.
+    for (existing_lid, new_fields) in &pending_upserts {
+        execute_upsert(engine, *existing_lid, new_fields, &stmt.lobe)?;
     }
 
     // 6. Record writes in ghost router for staleness tracking + persist periodically

@@ -341,7 +341,7 @@ Ghosts created with `GROUP BY <field> AGGREGATE func()` clauses persist per-grou
 
 Any other predicate disqualifies the ghost from PreComputed; the router falls back to `Primary` (or to `Ghost` if a non-PreComputed match exists). This guarantees the pre-computed group entries returned to the caller satisfy every `WHERE` clause in the query, not just those covered by the ghost definition.
 
-**Operator support today**: PreComputed honours `=` only on group keys. Non-Eq predicates on group keys (`!=`, `<`, `<=`, `>`, `>=`, `IN`) disqualify the ghost from PreComputed. Range support on group keys is v0.3 scope.
+**Operator support**: PreComputed honours `=` only on group keys. Non-Eq predicates on group keys (`!=`, `<`, `<=`, `>`, `>=`, `IN`) disqualify the ghost from PreComputed and route to Primary. Widening the set is possible but not planned: a query the ghost cannot answer exactly is cheaper to answer from Primary than to answer wrongly from the ghost. Same wording as the `read_precomputed` doc comment it describes.
 
 **Two matching passes** still run in sequence:
 

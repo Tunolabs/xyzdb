@@ -61,6 +61,13 @@ filter, and none of them has been measured:
 - **The pinned-field lists** and their legacy key, loaded at boot. Same shape the
   specs had. Losing them loses which columns a read projects — not a constraint.
 - The duplicate check in `DECLARE ANCHOR`, and a ghost metadata load.
+- **The anchor collision check on the `PUT BATCH` path.** It reads the dictionary with
+  a plain bloom-gated `get`, without the bloom-less confirmation the single-`PUT` path
+  does. A false negative there would make a batch treat a colliding record as new:
+  without `ON CONFLICT UPDATE` a `DuplicateAnchor` that should fire does not, and with
+  it the record is inserted instead of merged — a duplicate under `UNIQUE` either way.
+  Same consequence as the batch-upsert defect fixed in 1.1.0, reached through a
+  different door. Vulnerable **by inspection**; not measured.
 - **The ghost's point-read of a source record** (`ghost/read.rs`). The sharpest of
   the three: its miss branch skips the record, so a false negative there **silently
   drops rows from a result** rather than raising anything. And ghosts are materialised
@@ -82,9 +89,10 @@ the bad parts is easy to misread: "not mentioned" looks exactly like "nobody loo
 - **`UNIQUE` anchor declarations.** They do not live in the keyspace at all —
   `AnchorRegistry` is loaded from its own file under `meta/` (`engine/boot.rs`), so no
   bloom, no point lookup, no range scan. A false negative cannot reach them.
-- **The `UNIQUE` constraint on the write path.** The duplicate check confirms a miss
-  without the bloom before trusting it (`ops/put.rs`), and that was verified under a
-  total forge: a `PUT` reusing an existing key still collides.
+- **The `UNIQUE` constraint on the single-`PUT` write path.** The duplicate check
+  confirms a miss without the bloom before trusting it (`ops/put.rs`), and that was
+  verified under a total forge: a `PUT` reusing an existing key still collides. The
+  `PUT BATCH` path does **not** share that confirmation — see the list above.
 
 **Reachability, precisely.** Demonstrated for the three declaration loads — that is
 what the forged test showed before the fix. **Not measured** for the paths listed
@@ -98,7 +106,8 @@ and already compacted and therefore safe. It did not hold where it was checked.
 | | Status |
 |---|---|
 | Root cause | **not diagnosed**, no live candidate |
-| Duplicate-anchor check (write path) | **closed** — confirms a miss without the bloom |
+| Duplicate-anchor check, single `PUT` | **closed** — confirms a miss without the bloom |
+| Anchor collision check, `PUT BATCH` | vulnerable by inspection, **not measured** — plain bloom-gated `get`, no confirmation |
 | Gravity / vector / satellite loads | **closed** by range scan — reachability **demonstrated** first |
 | Pinned-field lists | **closed** by range scan — same defect, lighter consequence |
 | `UNIQUE` anchor declarations | **never exposed** — `anchors.bin` lives outside the keyspace |
@@ -131,45 +140,6 @@ lookup goes through the anchor path.
 **What it costs you.** A pipeline that assumes the root is present can silently
 operate on a child. If you use `FIND | PULL` under concurrent write load, check the
 record type of what comes back rather than assuming position.
-
----
-
-### `PUT BATCH … ON CONFLICT UPDATE` inserts a duplicate under a `UNIQUE` anchor
-
-**What.** In a batch, `ON CONFLICT UPDATE` neither updates the existing record nor
-skips the incoming one: it inserts it. The lobe ends up holding two records with the
-same value under a field declared `ANCHOR … UNIQUE`, which is the one thing that
-declaration exists to prevent. The single-statement `PUT … ON CONFLICT UPDATE` is
-correct and does update.
-
-**When.** Any batch whose record collides with an anchor value already stored, and
-any batch containing two records that share an anchor value. Both reproduce on 1.1
-in a few statements:
-
-```text
-LOBE "u"
-ANCHOR "k" UNIQUE IN "u"
-PUT BATCH IN "u" [{k: "x", v: 1}]
-PUT BATCH IN "u" [{k: "x", v: 2}] ON CONFLICT UPDATE   -- "1 records inserted"
-SCAN "u" WHERE k = "x" | AGGREGATE count()             -- 2
-```
-
-The same batch *without* `ON CONFLICT UPDATE` correctly errors with
-`Duplicate anchor 'k' = 'x'`, which is how we know the constraint check works and is
-being bypassed rather than missing.
-
-**Mechanism.** Established. The conflict branch does `continue`, intending to skip the
-record, but it sits inside the loop over the lobe's *anchor fields*, not the loop over
-*records* (`crates/engine/src/ops/put.rs`). With one anchor field the inner loop simply
-ends and the record is written.
-
-**What it costs you.** A duplicate that a later `FIND` on the anchor resolves to only
-one of, silently. If you batch upserts today, the updates are not happening. Use
-single `PUT … ON CONFLICT UPDATE` for anything that may collide, and batch only
-records whose anchor values are new. Which behaviour a batch upsert *should* have —
-skip, as the code intended, or update, matching the single-statement form — is a
-product decision that has not been made yet, which is why this is filed rather than
-patched.
 
 ---
 

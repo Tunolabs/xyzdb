@@ -32,6 +32,17 @@ fn id_set(qr: QueryResult) -> std::collections::BTreeSet<i64> {
         .collect()
 }
 
+/// Number of RECORDS returned — deliberately not `id_set().len()`, which is a
+/// set of `numero` values and collapses exactly the duplicates these tests are
+/// looking for. A duplicate-detection assertion built on a set cannot fail.
+fn rec_count(qr: QueryResult) -> usize {
+    match qr {
+        QueryResult::Records(r) => r.len(),
+        QueryResult::PaginatedRecords { records, .. } => records.len(),
+        other => panic!("expected records, got {other:?}"),
+    }
+}
+
 /// Declare a unique anchor on `numero` (so ON CONFLICT UPDATE conflicts on it)
 /// then seed a mix of active/inactive credits.
 fn setup(engine: &Engine, l: &str) {
@@ -94,4 +105,75 @@ fn upsert_keeps_covering_ghost_exact() {
         r#"PUT {numero:0, status:"active", grp:"g0", x:0, amount:100} IN "{L}" ON CONFLICT UPDATE"#,
     );
     check(&engine, "upsert inactive→active (enters filter)");
+}
+
+/// The same gate through the BATCH door. `PUT BATCH … ON CONFLICT UPDATE` used
+/// to insert a duplicate instead of updating; the fix routes the collision
+/// through `execute_upsert`, the same function the single statement uses. That
+/// is deliberate — merging inline in the batch loop would have skipped
+/// `notify_write` and re-opened P10 on a second path — and this test is what
+/// holds it there. Without it, nothing in the suite exercised a batch upsert at
+/// all (the file above had no `PUT BATCH` in it).
+#[test]
+fn batch_upsert_keeps_covering_ghost_exact() {
+    let dir = tempfile::tempdir().unwrap();
+    let engine = Engine::open(dir.path()).unwrap();
+    setup(&engine, "p");
+    setup(&engine, "g");
+    exec(
+        &engine,
+        r#"CREATE GHOST "gm" FROM "g" WHERE status = "active" ORDER BY x"#,
+    );
+
+    let q = r#"SCAN "{L}" WHERE status = "active" LIMIT 1000"#;
+    let check = |engine: &Engine, msg: &str| {
+        let p = id_set(exec(engine, &q.replace("{L}", "p")));
+        let g = id_set(exec(engine, &q.replace("{L}", "g")));
+        assert_eq!(
+            p, g,
+            "ghost membership drifted after {msg}\n  primary={p:?} ghost={g:?}"
+        );
+    };
+    check(&engine, "build");
+
+    // One batch carrying both directions at once: numero 2 leaves the filter,
+    // numero 3 enters it. Both are collisions on the UNIQUE anchor `numero`.
+    both(
+        &engine,
+        r#"PUT BATCH IN "{L}" [
+             {numero:2, status:"inactive", grp:"g2", x:2, amount:300},
+             {numero:3, status:"active",   grp:"g0", x:3, amount:400}
+           ] ON CONFLICT UPDATE"#,
+    );
+    check(&engine, "batch upsert (one leaves, one enters)");
+
+    // The anchor still holds: the upserts updated in place, they did not add a
+    // second record under the same `numero`. This is the assertion that fails
+    // against the pre-fix engine — the drift check above can pass while
+    // duplicates accumulate, because both lobes duplicate identically.
+    for numero in [2i64, 3] {
+        let n = rec_count(exec(
+            &engine,
+            &format!(r#"SCAN "p" WHERE numero = {numero} LIMIT 1000"#),
+        ));
+        assert_eq!(
+            n, 1,
+            "numero {numero} must exist exactly once after a batch upsert, found {n}"
+        );
+    }
+    // Total count is the real duplicate detector: 12 seeded, 0 added.
+    assert_eq!(
+        rec_count(exec(&engine, r#"SCAN "p" LIMIT 1000"#)),
+        12,
+        "batch upsert changed the record count; it must update in place"
+    );
+    // And the merge actually landed: numero 3 must now be active.
+    assert!(
+        id_set(exec(
+            &engine,
+            r#"SCAN "p" WHERE status = "active" LIMIT 1000"#
+        ))
+        .contains(&3),
+        "the batch upsert did not apply its field merge"
+    );
 }
