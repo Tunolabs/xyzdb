@@ -39,19 +39,50 @@ COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY .cargo/ .cargo/
 COPY crates/ crates/
 COPY tools/ tools/
-# Same AVX2-baseline guard as the engine image: fail loudly if the x86-v3 flag
-# is ever silently dropped from the build context for the amd64 build.
-RUN if [ "$TARGETARCH" = "amd64" ]; then \
+# Dual ISA, same as the engine image and for the same reason — with more at stake:
+# THIS is the image published to GHCR, so an amd64 build that requires AVX2 is the
+# one a user actually pulls, and on a pre-AVX2 host it dies with SIGILL before it
+# can say why. `xyzdb-mcp` links the engine for `--embed`, so it inherits
+# `target-cpu=x86-64-v3` exactly like `xyzdb-server` does.
+#
+# Arch from `uname -m`, not $TARGETARCH: the latter is populated only by buildx and
+# is EMPTY under the classic builder, which is what `apt install docker.io` gives
+# you on a current Ubuntu. The previous guard tested it and therefore printed
+# "arm baseline" while compiling for x86_64, skipping the assertion it exists for.
+#
+# Safe only because v2 and v3 produce byte-identical scores, gated in CI by
+# crates/core/tests/score_bit_identity.rs. The intermediate target dir is dropped
+# between builds: the differing RUSTFLAGS invalidate everything anyway, so the
+# second build is a full recompile and keeping both would double peak disk.
+RUN set -e; \
+    ARCH="$(uname -m)"; \
+    mkdir -p /build/out; \
+    export CARGO_PROFILE_RELEASE_LTO=fat CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1; \
+    if [ "$ARCH" = "x86_64" ]; then \
       grep -q 'target-cpu=x86-64-v3' .cargo/config.toml \
-        || { echo 'ERROR: target-cpu=x86-64-v3 missing from .cargo/config.toml for amd64 build'; exit 1; }; \
-      echo "xyzdb-mcp image: amd64 / x86-v3 — target-cpu=x86-64-v3 (AVX2) applies"; \
+        || { echo 'ERROR: target-cpu=x86-64-v3 missing from .cargo/config.toml for an x86_64 build'; exit 1; }; \
+      echo "xyzdb-mcp image: x86_64 — building BOTH v3 (AVX2) and v2 (baseline); the launcher selects at startup"; \
+      cargo build --release -p xyzdb-mcp; \
+      cp target/release/xyzdb-mcp /build/out/xyzdb-mcp.v3; \
+      rm -rf target/release; \
+      RUSTFLAGS="-C target-cpu=x86-64" cargo build --release -p xyzdb-mcp; \
+      cp target/release/xyzdb-mcp /build/out/xyzdb-mcp.v2; \
+      rm -rf target/release; \
     else \
-      echo "xyzdb-mcp image: ${TARGETARCH} — x86-v3 flag inert (arm baseline)"; \
+      echo "xyzdb-mcp image: $ARCH — one build; the x86 flag is target-scoped and inert here"; \
+      cargo build --release -p xyzdb-mcp; \
+      cp target/release/xyzdb-mcp /build/out/xyzdb-mcp.v2; \
+    fi; \
+    RUSTFLAGS="$([ "$ARCH" = x86_64 ] && echo '-C target-cpu=x86-64')" \
+      cargo build --release -p xyzdb-launch; \
+    cp target/release/xyzdb-launch /build/out/xyzdb-launch; \
+    echo "--- image payload:"; ls -la /build/out/; \
+    test -x /build/out/xyzdb-launch || { echo 'ERROR: launcher missing'; exit 1; }; \
+    test -x /build/out/xyzdb-mcp.v2 || { echo 'ERROR: baseline mcp binary missing'; exit 1; }; \
+    if [ "$ARCH" = "x86_64" ]; then \
+      test -x /build/out/xyzdb-mcp.v3 \
+        || { echo 'ERROR: x86_64 image without the v3 build — the launcher would always take the slow path'; exit 1; }; \
     fi
-# Match the tagged release artifact: fat LTO + single codegen unit. Only the
-# `xyzdb-mcp` binary is built here (the engine image builds `xyzdb-server`).
-RUN CARGO_PROFILE_RELEASE_LTO=fat CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
-    cargo build --release -p xyzdb-mcp
 
 # Runtime: distroless/cc-debian12 (glibc 2.36 + libgcc + libstdc++, ~34 MB).
 # The binary links only glibc/libgcc/libm (TLS is rustls, no openssl). No shell
@@ -68,7 +99,10 @@ LABEL io.modelcontextprotocol.server.name="io.github.Tunolabs/xyzdb"
 
 # Provenance parity with the engine image: explicit XYZ_IMAGE_VARIANT wins, else
 # the build arch ($TARGETARCH), never empty — the same expression as the engine.
-LABEL org.xyzdb.image-variant="${XYZ_IMAGE_VARIANT:-$TARGETARCH}"
+# `$TARGETARCH` is empty under the classic builder, so this used to render as an
+# empty string. Same fix as the engine image; the real fact is the label below.
+LABEL org.xyzdb.image-variant="${XYZ_IMAGE_VARIANT:-runtime-selected}"
+LABEL org.xyzdb.isa-selection="runtime (xyzdb-launch); x86_64 carries v2+v3, other arches one build"
 
 # ── OCI standard metadata (shown on the container registry listing) ─────────
 # The image is Business Source License 1.1, same as the engine. This does not
@@ -80,7 +114,10 @@ LABEL org.opencontainers.image.source="https://github.com/Tunolabs/xyzdb"
 LABEL org.opencontainers.image.url="https://github.com/Tunolabs/xyzdb"
 LABEL org.opencontainers.image.documentation="https://github.com/Tunolabs/xyzdb/blob/main/docs/mcp-integration.md"
 
-COPY --from=builder /build/target/release/xyzdb-mcp /usr/local/bin/
+COPY --from=builder /build/out/ /usr/local/bin/
+# Tells the shared launcher which pair to choose between: it appends .v3/.v2. The
+# same binary fronts the engine image, where the default (xyzdb-server) applies.
+ENV XYZDB_LAUNCH_TARGET=/usr/local/bin/xyzdb-mcp
 
 # Hint for --embed mode: mount the data dir here and pass `--embed /data`.
 # The actual path is caller-chosen; nothing is written unless --embed is used.
@@ -90,4 +127,7 @@ VOLUME /data
 # (`--embed <PATH>` or `--connect <HOST:PORT>`); with neither, the binary
 # exits with a clear error (clap ArgGroup, required). No default CMD on
 # purpose — the runner decides the mode.
-ENTRYPOINT ["xyzdb-mcp"]
+# The launcher execs the real binary, so it becomes this process image: stdio
+# framing, signals and exit codes all pass through unchanged. It writes its one
+# line to STDERR — stdout carries only MCP framing and must stay clean.
+ENTRYPOINT ["xyzdb-launch"]

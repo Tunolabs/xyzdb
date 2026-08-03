@@ -33,8 +33,16 @@ use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::Command;
 
-const V3: &str = "/usr/local/bin/xyzdb-server.v3";
-const V2: &str = "/usr/local/bin/xyzdb-server.v2";
+/// Base path of the binary to launch; `.v3` / `.v2` are appended. Overridable
+/// because the same launcher fronts two images: the engine (`xyzdb-server`) and
+/// the MCP server (`xyzdb-mcp`, which links the engine in `--embed` mode and so
+/// carries the same ISA baseline). One launcher, two entrypoints, no second copy
+/// of this logic to drift.
+const DEFAULT_BASE: &str = "/usr/local/bin/xyzdb-server";
+
+fn base() -> String {
+    std::env::var("XYZDB_LAUNCH_TARGET").unwrap_or_else(|_| DEFAULT_BASE.to_string())
+}
 
 /// Does this CPU implement the whole `x86-64-v3` level?
 ///
@@ -75,20 +83,26 @@ fn usable(p: &str) -> bool {
 
 fn main() -> ! {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    let base = base();
+    let v3 = format!("{base}.v3");
+    let v2 = format!("{base}.v2");
 
     // Preference order, best first. Each candidate carries why it would be
     // chosen, so the message explains the decision rather than announcing it.
     let mut candidates: Vec<(&str, &str)> = Vec::new();
     if cpu_has_v3() {
-        candidates.push((V3, "CPU implements x86-64-v3 (AVX2/FMA/BMI2)"));
-        candidates.push((V2, "fell back after the v3 build could not be executed"));
+        candidates.push((v3.as_str(), "CPU implements x86-64-v3 (AVX2/FMA/BMI2)"));
+        candidates.push((
+            v2.as_str(),
+            "fell back after the v3 build could not be executed",
+        ));
     } else if cfg!(target_arch = "x86_64") {
         candidates.push((
-            V2,
+            v2.as_str(),
             "CPU does not implement x86-64-v3; using the portable baseline build",
         ));
     } else {
-        candidates.push((V2, "single build in this image"));
+        candidates.push((v2.as_str(), "single build in this image"));
     }
 
     let mut tried = 0;
@@ -120,8 +134,8 @@ fn main() -> ! {
 
     if tried == 0 {
         eprintln!(
-            "xyzdb-launch: no usable engine binary in this image (looked for {V3} then \
-             {V2}) — it was built wrong; refusing to guess"
+            "xyzdb-launch: no usable binary in this image (looked for {v3} then {v2}) \
+             — it was built wrong; refusing to guess"
         );
         std::process::exit(78); // EX_CONFIG
     }

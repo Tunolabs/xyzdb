@@ -77,6 +77,13 @@ ghcr.io/tunolabs/xyzdb-mcp:1.1.0
 The image is Business Source License 1.1, same as the engine — see
 [`LICENSE`](../LICENSE).
 
+On x86-64 it carries two builds of `xyzdb-mcp` — a portable baseline and an AVX2
+(`x86-64-v3`) one — and its entrypoint picks whichever the host CPU can run.
+Nothing to choose, same tag either way. The one line it prints goes to **stderr**
+(`xyzdb-launch: exec xyzdb-mcp.v3 (...)`), because stdout carries only MCP framing
+and a byte of noise there breaks the transport. Before 1.1.0 the amd64 image
+required AVX2 and died with `SIGILL` on hosts without it.
+
 The MCP transport is **JSON-RPC 2.0 over stdio**, so the container must run
 with an open, attached stdin: `docker run -i` (no `-t`, no `-d`). All logs go
 to stderr; stdout carries only MCP framing. There is no default command — pass

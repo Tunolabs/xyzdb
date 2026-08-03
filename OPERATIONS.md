@@ -18,7 +18,31 @@ xyzDB ships as a **single-process daemon** (`xyzdb-server`) that owns one engine
 
 The dispatcher in `xyzdb-server/src/connection.rs` peeks the first byte once and routes to either the wire path or the HTTP path. There is no second listener and no second port — TLS, when configured via `--tls-cert`/`--tls-key`, wraps the same socket and the same byte-detection runs on the decrypted stream.
 
-### 1.1 Standalone
+### 1.1 The image picks its instruction set at startup
+
+On x86-64 the published images carry **two** builds of the binary — a portable
+baseline and an AVX2 (`x86-64-v3`) one — and the container entrypoint
+`xyzdb-launch` execs whichever the host CPU can actually run. You choose nothing
+and the tag does not change.
+
+It says which one on **stderr**, once, before handing over:
+
+```
+xyzdb-launch: exec xyzdb-server.v3 (CPU implements x86-64-v3 (AVX2/FMA/BMI2))
+```
+
+Read that line when comparing two hosts: a machine that reports
+`xyzdb-server.v2 (CPU does not implement x86-64-v3 ...)` is running the portable
+build and will be slower on vector work. It is not a misconfiguration — it is the
+only build that host can execute — but it explains a latency difference that
+would otherwise look inexplicable.
+
+The launcher `exec`s rather than spawns, so the engine still becomes the
+container's process image and receives `SIGTERM` directly (§9 Shutdown). If
+neither build is present the container exits 78 (`EX_CONFIG`) with the paths it
+looked for, rather than starting something unintended.
+
+### 1.2 Standalone
 
 ```
         ┌──────────────────────────────────────┐
@@ -41,7 +65,7 @@ Access patterns:
 - **Operator browser**: open `http://host:2505/` (or `https://` when TLS is on). The page polls `GET /stats` every 5 s for live state.
 - **Prometheus scraper**: `/metrics` is served natively on the wire — a V1 `/metrics` query returns the Prometheus exposition, and it follows `--auth-token` like `STATS`. Prometheus scrapes HTTP, so bridge it with a small sidecar that issues the wire query (`echo /metrics | xyzdb-cli`, or a ~30-line wrapper) and re-exposes the body over HTTP. See §5.
 
-### 1.2 MCP `--connect` topology (multi-process)
+### 1.3 MCP `--connect` topology (multi-process)
 
 ```
         ┌─────────────┐          ┌──────────────┐
@@ -55,7 +79,7 @@ Access patterns:
 
 > **MCP `--connect` auth**: `xyzdb-mcp --connect` reads `XYZDB_TOKEN` and sends it as the bearer-token preamble, so it authenticates against an upstream server started with `--auth-token`. Set `XYZDB_TOKEN` in the MCP process environment to the same token; leave it unset when the server is open.
 
-### 1.3 Operator surface — accessing `GET /`
+### 1.4 Operator surface — accessing `GET /`
 
 | Step | Without `--auth-token` | With `--auth-token <file>` |
 |---|---|---|
@@ -72,7 +96,7 @@ Access patterns:
 
 **Performance**: `/stats` polled every 5 s is the same payload the wire-side `STATS` query returns; cost is dominated by `serde_json::to_vec(&stats_snapshot)` which is microseconds per call.
 
-### 1.4 Single-host vs distributed (post-v1.0)
+### 1.5 Single-host vs distributed (post-v1.0)
 
 xyzDB is **single-host only**. There is no cluster mode, no replica, no shard router. Durability is local-disk (WAL + fsync) and operability is single-binary-on-one-VM. Distributed shapes (cross-AZ replication, leader/follower, multi-tenant lobe partitioning) are **post-v1.0** explorations.
 
@@ -92,6 +116,7 @@ Operationally this means:
 |---|---|---|
 | `--path` | `./data/xyzdb` | Data directory. Must be on a single filesystem (snapshot/restore use hard links). |
 | `--port` | `2505` | TCP port. |
+| `--version` | — | Print the version and exit. The first step of §8.4; it exists since 1.1.0. |
 | `--bind` | `127.0.0.1` | Bind address. Loopback by default (not reachable off-host). A non-loopback bind (e.g. `0.0.0.0`) with no `--auth-token` refuses to start. |
 | `--storage-profile` | `ssd` | `ssd` or `hdd`. HDD widens block size to 64 KB and bloom to 14 bits/key. |
 | `--io-scheduler` | `ssd` | `ssd` (Passthrough) or `hdd` (Laned). Independent from `--storage-profile`. |
@@ -766,7 +791,7 @@ This happens when the binary's compiled `MANIFEST_VERSION` (or `GHOST_META_FORMA
 
 - **Automatic in-place cross-format migration.** When `MANIFEST_VERSION` changes between releases the upgrade is re-ingestion (recreate from source) — not a silent in-place rewrite. `xyzdb-cli admin migrate <lobe>` / `--all` is a different tool: it rehashes gravity keys to the canonical value-only convention and is crash-safe, idempotent, and re-runnable (committed in windows). It is not a record-format converter.
 - **Concurrent old + new binaries on the same data dir**. The on-disk MANIFEST and WAL are not multi-writer safe across versions.
-- **Online (zero-downtime) upgrade** within a single instance. Take the instance out of rotation, do the upgrade, put it back. For high-availability deployments use two instances with snapshot-based copy (§1.4 Single-host vs distributed).
+- **Online (zero-downtime) upgrade** within a single instance. Take the instance out of rotation, do the upgrade, put it back. For high-availability deployments use two instances with snapshot-based copy (§1.5 Single-host vs distributed).
 
 ---
 
