@@ -242,5 +242,13 @@ the shipped pruner.
 Design limits — things xyzDB does not do, as opposed to things it does wrong — are
 listed in the README under
 [**What xyzDB is not**](README.md#what-xyzdb-is-not), and are not repeated here.
-That includes the unbounded `FIND`/`PULL` result sets, the plaintext auth token, and
-the absence of an in-place migration from pre-1.0 data directories.
+That includes the unbounded `FIND`/`PULL` result sets and the absence of an in-place
+migration from pre-1.0 data directories.
+
+One limitation lives elsewhere and is pointed at rather than moved: the auth token is
+stored **in plaintext on disk**, stated in
+[`docs/usage/reference.md`](docs/usage/reference.md) §Security beside the flag that
+reads it. The README's security bullet covers the authorization model — that there is
+none — which is a different limitation; an earlier version of this file sent readers
+there for the plaintext one and they would not have found it. TLS 1.3 protects the
+token **in transit** (`--tls-cert` / `--tls-key`); at rest it is a file on your disk.
