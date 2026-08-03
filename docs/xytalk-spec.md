@@ -519,8 +519,9 @@ FIND "fintech" WHERE invoice_id="INV-001" | SET status = "paid", paid_at = @"202
 
 **Behavior:**
 - Updates `updated_at` timestamp automatically
-- Does NOT recalculate `gravity_hash` — if a `*gravity` field is changed, the record stays in its original location until compaction
-- The standalone `WHERE` accepts the full `OR`/`NOT`/`IN` tree (§3), not just AND: an AND-pure predicate takes the anchor/gravity fast path, `OR`/`NOT` scans the target and filters. Ghosts stay exact either way (the update fires the ghost `notify_write` hook).
+- **`SET` moves a record whose placement changed.** It recomputes the gravity hash through the same keel the `SCAN` fast path resolves; when the value differs, the record is **atomically moved** — old spatial key removed, new one written, identity repointed, all in one batch, so a crash cannot leave it in both places or neither. The satellite axis (§2.2.2) moves the same way. The `vectors` column follows the record's final key, so an embedding is not dropped by a move.
+- This is what makes `SET` the way to change a gravity or satellite field. `PUT … ON CONFLICT UPDATE` — single or batch — updates **in place** and does not move anything (§2.3, §2.4): a record whose axis field changes through an upsert is stranded in its old bucket, invisible to a bounded query on the new value.
+- The standalone `WHERE` accepts the full `OR`/`NOT`/`IN` tree (§3), not just AND: an AND-pure predicate takes the anchor/gravity fast path, `OR`/`NOT` scans the target and filters. Ghosts stay exact either way (the update fires the ghost `notify_write` hook, and a move reports both the old and new keys so ghost maintenance can find the record).
 
 #### 2.8 DELETE — Remove Records
 
@@ -562,7 +563,7 @@ PURGE "scratch"     -- remove every record in "scratch"
 
 **Behavior:**
 - Removes every record in the lobe through the same per-record delete path as a WHERE-matching `DELETE`, so ghosts and anchor indexes are maintained (each removal fires `notify_write`): after `PURGE`, a routed aggregate over the lobe returns empty, and an anchor `FIND` finds nothing — no stale derived state survives.
-- Classified as a destructive statement by the MCP query policy (§ trust boundary), alongside `DELETE` and `DROP GHOST`.
+- Classified as a destructive statement by the MCP query policy, alongside `DELETE` and `DROP GHOST`, so `--query-policy no-destructive` refuses it (`docs/mcp-integration.md` § `query`). This document does not define that policy — it is an MCP-layer control, not part of the language.
 
 ---
 
