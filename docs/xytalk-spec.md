@@ -1010,6 +1010,12 @@ SHOW THROTTLE
 
   `Gravity:` names the primary co-location axis (§2.2.1) and is the one to read first — a query pinning it reads one bucket, one that does not sweeps the lobe. `Satellite:` names the sub-gravity axis (§2.2.2), which is a sub-range *of* that bucket and only means something alongside a declared gravity. `Vector:` is `<field> dim <n>`, or `dim unknown` before the first embedding fixes the dimension (§2.20). Each of the three reads `(none)` when the lobe declares it not. `Pinned:` lists pinned fields (§2.18) — a projection, unrelated to anchors, which do not appear here at all. `Learned:` is the scan patterns observed for this lobe and `Ghosts:` the active ghosts, with a `[projected]` marker for fields stored on the ghost entry. Both count when non-empty (`Learned: 3 pattern(s)`, `Ghosts: 2 active`) and list their entries on following indented lines.
 
+**The order is contract, not layout.** A line indented under a labelled line belongs to
+that label — the entries of `Learned:` and `Ghosts:` are read that way, so a
+mis-ordered emission silently reassigns them to the preceding section instead of
+failing. Anything that emits a new line has to decide where it goes, not only what it
+is called.
+
 > The set of lines is gated: `SHOW PROFILE` cannot emit a label this section does not mention. `ProfileLine` in `engine/verbs.rs` enumerates them with no wildcard arm, so a new line fails to compile until it is named, and a test then fails until it is documented here.
 - `SHOW THROTTLE` — current write throttle state across all lobes (Healthy / Degraded / Critical / Paused) and the active throttle profile (`balanced`, `transactional`, `analytical`, `bulk`, `maintenance` — see §6).
 
