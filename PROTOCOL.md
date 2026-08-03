@@ -1,5 +1,12 @@
 # xyzDB wire protocol
 
+**Audience**: someone implementing a client against `xyzdb-server` without
+reading the engine source.
+**Surface**: the bytes on the TCP socket — framing, the auth preamble, format
+bytes, response bodies and their fields. Not the query language (that is
+`docs/xytalk-spec.md`), not operator flags (`OPERATIONS.md`), and not the HTTP
+page multiplexed onto the same port (§11, explicitly out of scope).
+
 This document specifies the binary wire protocol that an `xyzdb-server` speaks
 over TCP. It is written for people building third-party clients. Everything here
 is derived from the server source; each constant and behaviour cites the file
@@ -21,7 +28,14 @@ All integers are **big-endian**. All source references are to
 
 - **TCP.** The server binds one listening socket (`main` in `main.rs`).
 - **Default port `2505`** (`--port`, `main.rs`), default bind address
-  `0.0.0.0` (`--bind`, `main.rs`).
+  **`127.0.0.1`** (`--bind`, `main.rs`) — so a default server is not reachable
+  off-host and a client on another machine cannot connect until the operator
+  changes it. Binding a non-loopback address with no `--auth-token` refuses to
+  start unless `--insecure-allow-no-auth` is passed
+  (`refuse_unauthenticated_bind` in `main.rs`), so any server a third-party
+  client reaches over a network either has a token or was opened deliberately.
+  The container image commands `0.0.0.0`, which is why a plain `docker run`
+  without a token fails to start rather than exposing an open server.
 - **Framing.** Every message is length-prefixed. A single connection may carry
   many request/response frames in sequence (except the bulk-load and HTTP modes,
   which own the whole connection).
@@ -83,7 +97,7 @@ Server behaviour (`auth_handshake` in `connection.rs`):
   On mismatch the server writes an error frame (§8) and closes
   (`auth_handshake` in `connection.rs`). After a successful auth it reads the actual
   protocol-version byte and proceeds (`auth_handshake` in `connection.rs`). A connection
-  whose first byte is neither `AUTH_MAGIC` nor an allowlisted probe (§10) is
+  whose first byte is neither `AUTH_MAGIC` nor an allowlisted probe (§11) is
   rejected with `ERROR: server requires auth (Authorization: Bearer <token>);
   send AUTH_MAGIC frame first` (`auth_handshake` in `connection.rs`).
 - **Server started without `--auth-token`** (open server): it still **accepts
@@ -95,6 +109,12 @@ Server behaviour (`auth_handshake` in `connection.rs`):
 The token is read from a UTF-8 file named by `--auth-token`; leading and
 trailing whitespace is trimmed, and an empty token file is refused at startup
 (`--auth-token`, `main` in `main.rs`).
+
+**The frame carries the token in the clear.** There is no challenge, nonce or
+hash — the bytes on the wire are the token. On a plain-TCP server (§2) anything
+that can read the connection can replay it, so a client that authenticates over
+an untrusted network needs the server to be running with TLS. This is a property
+of the protocol, not of any one client.
 
 ## 5. Protocol versions and request framing
 
@@ -241,6 +261,14 @@ end:     [len: u32 BE = 0]                                (write_end_marker_sync
 
 A client that does not request a chunked format never sees this shape.
 
+**Chunked formats are plain-TCP only.** Over TLS the server refuses both chunked
+format bytes with a `STATUS_ERROR` frame reading `ERROR: chunked streaming format
+unsupported on a TLS connection; use a non-chunked request format over TLS`
+(`handle_tls_connection` in `connection.rs`). The streaming writer takes the raw
+file descriptor and would bypass TLS record framing, so the refusal is structural
+rather than a missing feature flag. A client that wants both TLS and large results
+pages with a cursor (§8.1) instead.
+
 ## 10. Frame size limit
 
 `MAX_FRAME_SIZE = 16 * 1024 * 1024` (16 MiB) (`protocol.rs`). It bounds each
@@ -287,7 +315,8 @@ clients do not use it.
   safe to always send.
 - V4 bound parameters (§5) — recommended for untrusted input; otherwise V2 is
   sufficient.
-- The BINARY / chunked formats (§6, §9) and the V3 bulk-load mode (§7).
+- The BINARY / chunked formats (§6, §9) and the V3 bulk-load mode (§7). The
+  chunked formats are available on plain TCP only (§9).
 
 **Version compatibility.** V1 → V2 → V4 are additive and a single server accepts
 all of them simultaneously; the version byte selects the shape per connection
