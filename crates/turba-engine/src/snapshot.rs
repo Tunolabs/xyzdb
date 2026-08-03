@@ -175,7 +175,9 @@ pub fn read_snapshot_meta(snapshot_dir: &Path) -> Result<SnapshotMeta> {
 /// - Hard-links every SST file from `snapshot_dir/<keyspace>/*.sst` to
 ///   `target_dir/<keyspace>/*.sst` when both are on the same
 ///   filesystem; errors with [`Error::SnapshotCrossFilesystem`]
-///   otherwise (operator chooses an explicit copy mode in v0.5+).
+///   otherwise (there is no copy fallback: a cross-filesystem snapshot
+///   would silently cost a full data copy, so the operator is told
+///   instead of charged for it).
 /// - Copies each per-keyspace MANIFEST and the captured `journal.wal`
 ///   into the target dir.
 ///

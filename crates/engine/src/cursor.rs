@@ -1,4 +1,4 @@
-//! v0.2.5.1 — Opaque pagination cursor for plain SCAN.
+//! Opaque pagination cursor for plain SCAN.
 //!
 //! A cursor token is the engine's way of resuming a SCAN where the
 //! previous page left off. The wire form is intentionally opaque: clients
@@ -12,11 +12,13 @@
 //! base64 because cursors round-trip through HTTP query strings, JSON
 //! responses, and CLI arguments without further escaping.
 //!
-//! ## Scope (v0.2.5.1)
+//! ## Scope
 //!
-//! - **Plain SCAN only.** Cursor + ORDER BY and cursor + ghost routing
-//!   land in v0.3 with a dedicated payload variant. The current `execute_scan`
-//!   forces `ScanSource::Primary` whenever a cursor is present.
+//! - **Plain SCAN only.** Cursor + ORDER BY and cursor + ghost routing are
+//!   refused: a cursor names a position in the spatial keyspace, which is
+//!   neither a position in a sorted result nor one in a ghost's own order.
+//!   Supporting either needs a different payload variant; none is planned.
+//!   `execute_scan` forces `ScanSource::Primary` whenever a cursor is present.
 //! - **Filter checksum binds the cursor to its query.** Re-using a cursor
 //!   with a different `WHERE` clause returns an explicit error rather than
 //!   silently producing an inconsistent page (see `filter_checksum`).

@@ -1434,7 +1434,8 @@ struct PaginatedScanOutput {
 
 /// Bounded primary SCAN with optional cursor seek + overscan-by-one for
 /// `has_more` detection. Always traverses the spatial keyspace (no ghost
-/// routing): cursor + ghost paging is v0.3 scope.
+/// routing): a cursor is a spatial-key position, which says nothing about
+/// where to resume inside a ghost.
 fn scan_primary_paginated(
     engine: &Engine,
     lobe_id: u16,

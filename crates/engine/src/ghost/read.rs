@@ -210,8 +210,10 @@ impl GhostLobeManager {
     ///
     /// This is the minimum sufficient scope for v0.2.4. Non-`Eq`
     /// operators on group keys (`!=`, `<`, `<=`, `>`, `>=`, `IN`, …)
-    /// are not yet implemented here; the router must steer such
-    /// queries to Primary. Incremental operator support lands in v0.3+.
+    /// are not implemented here; the router must steer such queries to
+    /// Primary. Widening the set is possible but not planned — a query
+    /// the ghost cannot answer exactly is cheaper to answer from Primary
+    /// than to answer wrongly from the ghost.
     pub fn read_precomputed(
         &self,
         name: &str,

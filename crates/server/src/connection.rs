@@ -92,12 +92,14 @@ pub async fn handle_connection(
     }
 }
 
-/// Handle a TLS-wrapped client connection. v0.4 item 3.
+/// Handle a TLS-wrapped client connection.
 ///
 /// Shares the V1/V2 sync request path with `handle_connection` via
 /// `process_request_sync`. V4 chunked streaming is rejected with an error
 /// frame because the plain-TCP streaming path uses `as_raw_fd` + sync
-/// writes that bypass TLS record framing. Streaming SCAN over TLS is v0.5.
+/// writes that bypass TLS record framing. Streaming SCAN over TLS would
+/// need a TLS-aware writer for that path; it is not implemented, and a
+/// client that needs both should page with a cursor instead.
 pub async fn handle_tls_connection<S>(
     engine: Arc<Engine>,
     mut stream: S,
