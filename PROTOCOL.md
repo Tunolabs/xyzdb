@@ -169,6 +169,46 @@ Status bytes (`protocol.rs`): `STATUS_OK = 0x00`, `STATUS_ERROR = 0x01`,
 payload — `"records"` for FIND/SCAN, `"aggregation"` for AGGREGATE, etc.
 (`serialize_json` in `json_response.rs`).
 
+### 8.1 Fields a client MUST NOT drop
+
+A result can be **partial**, and it says so in the body rather than in the status
+byte: a truncated answer is `STATUS_OK`. A client that reads only `records` cannot
+tell a complete result from an incomplete one, and this section exists because that
+is not hypothetical — the 1.0.x reference clients dropped these fields in their
+fluent terminal, so a partial arrived looking exactly like a full answer.
+
+| Field | When present | Meaning |
+|---|---|---|
+| `records` | FIND / SCAN / pipelines returning rows | the rows |
+| `has_more` | a truncated result | more rows exist beyond this frame |
+| `cursor` | a resumable page | opaque token for the next `SCAN … CURSOR` |
+| `budget_stop` | **only** a `NEAREST` cut by `--nearest-budget-ms` | the cut, described below |
+
+`has_more = true` with `cursor = null` is a legitimate combination and is **not** a
+bug: a `NEAREST` cut by the latency airbag has no resumable page, because resuming
+would repeat the whole scoring pass. Treat it as "these are the best found, more may
+exist", not as "call again".
+
+`budget_stop` has four members:
+
+| Member | Meaning |
+|---|---|
+| `candidates` | the whole **scored** set, before the residual filter — **not** the number of matches |
+| `examined` | how many had the residual **checked** before the cut |
+| `found` | how many **passed** |
+| `strategy` | `"score_order"` or `"key_order"` — which traversal produced it |
+
+`strategy` is load-bearing, not decoration. Under `"score_order"` the rows are a
+prefix of the true answer, so what was not reached is *worse*. Under `"key_order"`
+they are the best of a contiguous key region and the unwalked part may hold
+**better** rows. A client that reports "these are the closest" is correct under the
+first and wrong under the second. 1.1.0 emits only `"score_order"`; read the field
+rather than assuming it.
+
+`budget_stop` is absent from every non-truncated response, so ordinary frames are
+byte-identical to a client that never looks for it. Full semantics:
+`docs/xytalk-spec.md` §2.20.
+
 **JSON error** bodies (`serialize_json_error`, `json_response.rs`):
 
 ```json
