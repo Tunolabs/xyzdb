@@ -2243,6 +2243,7 @@ dependencies = [
  "rmcp-macros",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",

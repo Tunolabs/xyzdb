@@ -590,3 +590,155 @@ mod tests {
         assert_eq!(p.active_ghosts_count, 1);
     }
 }
+
+#[cfg(test)]
+mod writer_parser_roundtrip {
+    //! These parsers versus what the engine actually prints.
+    //!
+    //! The failure this closes happened: `parse_show_profile` matched the literal
+    //! `"Learned patterns:"`, the engine's formatter was changed to emit
+    //! `"Learned: N pattern(s)"`, and the section went **silently empty** instead
+    //! of failing. The fixtures in this file could not catch it — they are
+    //! hand-written strings, so they agreed with the parser and both drifted away
+    //! from the writer together.
+    //!
+    //! So these tests take their input from `Engine::run`, not from a literal.
+    //!
+    //! # Declared resolution — what this gate does NOT see
+    //!
+    //! It runs one process: this crate's parser against the engine it is compiled
+    //! against. That closes **writer↔parser drift within a version**, which is the
+    //! defect above. It does **not** cover the pair that drifts in the field — a
+    //! *published* engine against a *published* client — because that only shows up
+    //! over the wire, between two independently versioned artifacts. A green here
+    //! is not evidence that an older server's output parses. Do not cite it as such.
+    use super::*;
+    use xyzdb_engine::engine::Engine;
+
+    /// Real engine, real statements, real formatter. Returns the `Info` lines the
+    /// way `fetch_show_lines` does in embed mode.
+    fn show(engine: &Engine, stmt: &str) -> Vec<String> {
+        match engine.run(stmt).unwrap_or_else(|e| panic!("{stmt}: {e:?}")) {
+            xyzdb_core::result::QueryResult::Info(lines) => lines,
+            other => panic!("{stmt} returned {other:?}, expected Info"),
+        }
+    }
+
+    /// A lobe with every declaration the profile can report, plus an anchor and a
+    /// ghost so all three parsers have something to find.
+    fn engine_with_everything() -> (Engine, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let engine = Engine::open(dir.path()).unwrap();
+        for stmt in [
+            r#"LOBE "l""#,
+            r#"ANCHOR "code" UNIQUE IN "l""#,
+            r#"GRAVITY BY scope IN "l""#,
+            r#"SATELLITE BY kind IN "l""#,
+            r#"VECTOR emb IN "l""#,
+            r#"PIN extra IN "l""#,
+            r#"PUT {code: "c1", scope: "s", kind: "k", extra: 1} IN "l""#,
+            r#"CREATE GHOST "g" FROM "l" WHERE kind = "k" | TAKE BY extra"#,
+        ] {
+            engine.run(stmt).unwrap_or_else(|e| panic!("{stmt}: {e:?}"));
+        }
+        (engine, dir)
+    }
+
+    #[test]
+    fn profile_parses_every_line_the_engine_prints() {
+        let (engine, _d) = engine_with_everything();
+        let lines = show(&engine, r#"SHOW PROFILE "l""#);
+        let p = parse_show_profile(&lines);
+
+        assert_eq!(p.gravity.as_deref(), Some("scope"), "lines: {lines:?}");
+        assert_eq!(p.satellite.as_deref(), Some("kind"), "lines: {lines:?}");
+        assert_eq!(
+            p.vector.as_ref().map(|v| v.field.as_str()),
+            Some("emb"),
+            "lines: {lines:?}"
+        );
+        assert!(
+            p.pinned_fields.iter().any(|f| f == "extra"),
+            "pinned lost: {lines:?}"
+        );
+        assert_eq!(p.active_ghosts_count, 1, "ghost count lost: {lines:?}");
+    }
+
+    /// The exact shape that broke: a `Learned:` line with content. The engine only
+    /// prints it once telemetry has a pattern for the lobe, so the parser is fed
+    /// the engine's OWN empty form here and the populated form is asserted through
+    /// the label, not through a fixture.
+    #[test]
+    fn profile_learned_line_is_recognised_in_both_forms() {
+        let (engine, _d) = engine_with_everything();
+        let lines = show(&engine, r#"SHOW PROFILE "l""#);
+        let learned: Vec<&String> = lines.iter().filter(|l| l.contains("Learned")).collect();
+        assert_eq!(
+            learned.len(),
+            1,
+            "expected exactly one Learned line: {lines:?}"
+        );
+        // Whatever the engine prints, the parser must consume it as the Learned
+        // line rather than fall through to another section.
+        let p = parse_show_profile(&lines);
+        assert!(
+            p.learned_patterns.is_empty(),
+            "a lobe with no scan history must report no patterns, got {:?}",
+            p.learned_patterns
+        );
+        // And the populated form must be recognised by label, not by sentence.
+        // The indented pattern must follow its own header, exactly where the
+        // engine puts it. Appending it at the end instead let the `Ghosts:` line
+        // claim it — which is the parser behaving correctly and the test being
+        // built wrong, so the placement is part of what is under test.
+        let mut populated: Vec<String> = Vec::new();
+        for l in &lines {
+            if l.contains("Learned") {
+                populated.push("  Learned: 1 pattern(s)".to_string());
+                populated.push("    scope = s (3 times, avg 40ms)".to_string());
+            } else {
+                populated.push(l.clone());
+            }
+        }
+        let p2 = parse_show_profile(&populated);
+        assert_eq!(
+            p2.learned_patterns.len(),
+            1,
+            "the populated Learned form was not consumed: {populated:?}"
+        );
+    }
+
+    #[test]
+    fn anchors_and_ghosts_parse_what_the_engine_prints() {
+        let (engine, _d) = engine_with_everything();
+        let anchors = parse_show_anchors(&show(&engine, r#"SHOW ANCHORS IN "l""#));
+        assert!(
+            anchors.iter().any(|a| a.name == "code"),
+            "anchor lost: {anchors:?}"
+        );
+        let ghosts = parse_show_ghosts_filtered(&show(&engine, "SHOW GHOSTS"), "l");
+        assert_eq!(ghosts.len(), 1, "ghost lost: {ghosts:?}");
+    }
+
+    /// Negative control. Every assertion above is "a field arrived", and a parser
+    /// that returned defaults for everything would fail them — but a parser that
+    /// ignored the label and filled fields positionally would pass. So: rename the
+    /// labels the engine printed and require the fields to go MISSING. If this
+    /// passes while the tests above pass, the gate is reading labels.
+    #[test]
+    fn renaming_the_engine_labels_loses_the_fields() {
+        let (engine, _d) = engine_with_everything();
+        let mutated: Vec<String> = show(&engine, r#"SHOW PROFILE "l""#)
+            .iter()
+            .map(|l| {
+                l.replace("Gravity:", "Sublimation:")
+                    .replace("Satellite:", "Moonlet:")
+                    .replace("Vector:", "Arrow:")
+            })
+            .collect();
+        let p = parse_show_profile(&mutated);
+        assert!(p.gravity.is_none(), "gravity survived a renamed label");
+        assert!(p.satellite.is_none(), "satellite survived a renamed label");
+        assert!(p.vector.is_none(), "vector survived a renamed label");
+    }
+}

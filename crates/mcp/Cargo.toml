@@ -55,3 +55,8 @@ twox-hash = { version = "2", default-features = false, features = ["xxhash3_64"]
 # version, no dep graph collision). Use that import instead of a standalone
 # `schemars` dep — rmcp 1.5 ships schemars 1.x; a separate `schemars = "0.8"`
 # would create two graph copies and the trait bounds for #[tool] would fail.
+
+[dev-dependencies]
+# The writer/parser gate in `describe.rs` opens a real engine in a temp dir: the
+# point is to parse what the engine actually prints, not a fixture of it.
+tempfile = "3"
