@@ -134,6 +134,18 @@ A record's physical key is `SpatialKey { lobe_id: u16, gravity_hash: u64 (48 bit
 
 The bit-level packing is an encoding detail of `to_bytes` / `from_bytes`; the public API operates on the 5-field struct. Block-level zone maps and bloom filters filter further within a co-located range, so even gravity buckets larger than a block stay efficient.
 
+### 2.3.1 Sub-gravity: the satellite axis
+
+Gravity decides *which bucket* a record lands in. The satellite axis decides *how one bucket is sub-divided*. `SATELLITE BY <field> IN "lobe"` names a single field whose value maps through `hash16` to the `sat` slot, so records sharing that value group together **inside** their gravity bucket.
+
+**Read path.** A query pinning both the gravity field and the satellite field resolves a sub-range (`prefix_for_satellite`: bytes 0..10 fixed, tail saturated) instead of the whole bucket. This bounds `SCAN`, `AGGREGATE`, `GROUP BY`, and the fused `NEAREST` of §3.7 — for `NEAREST` the candidate set *is* the satellite, so scoring inside it yields the exact top-k of the filtered set rather than an approximation.
+
+**Correctness does not depend on the hash.** `hash16` collides by design (a `u16` axis), so the read path always re-applies the field predicate as an anti-collision residual. The bounded scan is therefore a **pure optimisation**: same rows, same order as the parent-bucket scan, gated row-for-row.
+
+**Constraints, and why.** One axis per lobe (a single `u16` cannot carry two fields; a two-level split is deferred). Declared on an **empty** lobe: declaring it over live records would strand them at satellite 0 where a bounded query cannot see them, and re-packing existing data is a later path. Leaving is free — the parent sweep covers every satellite, so retracting the axis costs speed, never data or exactness. Records missing the field share satellite 0, so the axis only pays when the field is near-universal in the lobe.
+
+**Emission order is a declared consequence.** A parent-bucket sweep emits `sat → z_order → seq` once the axis is live, so surfaces that read "the first N emitted" see a different N. This is why the axis is opt-in per lobe rather than a global format change — `docs/xytalk-spec.md` §2.2.2 carries the user-facing rules, including that `SET` re-places a record whose satellite field changed while `ON CONFLICT UPDATE` does not.
+
 ### 2.4 Identifiers and references
 
 - **LID** (Local ID) — 128-bit, encodes node, lobe, timestamp, and sequence. Globally unique, monotonic, sortable.
@@ -161,18 +173,6 @@ Each `TurbaEngine` opens five `Tree` instances, each with its own WAL, memtable,
 
 | keyspace | content | key shape |
 |---|---|---|
-### 2.3.1 Sub-gravity: the satellite axis
-
-Gravity decides *which bucket* a record lands in. The satellite axis decides *how one bucket is sub-divided*. `SATELLITE BY <field> IN "lobe"` names a single field whose value maps through `hash16` to the `sat` slot, so records sharing that value group together **inside** their gravity bucket.
-
-**Read path.** A query pinning both the gravity field and the satellite field resolves a sub-range (`prefix_for_satellite`: bytes 0..10 fixed, tail saturated) instead of the whole bucket. This bounds `SCAN`, `AGGREGATE`, `GROUP BY`, and the fused `NEAREST` of §3.7 — for `NEAREST` the candidate set *is* the satellite, so scoring inside it yields the exact top-k of the filtered set rather than an approximation.
-
-**Correctness does not depend on the hash.** `hash16` collides by design (a `u16` axis), so the read path always re-applies the field predicate as an anti-collision residual. The bounded scan is therefore a **pure optimisation**: same rows, same order as the parent-bucket scan, gated row-for-row.
-
-**Constraints, and why.** One axis per lobe (a single `u16` cannot carry two fields; a two-level split is deferred). Declared on an **empty** lobe: declaring it over live records would strand them at satellite 0 where a bounded query cannot see them, and re-packing existing data is a later path. Leaving is free — the parent sweep covers every satellite, so retracting the axis costs speed, never data or exactness. Records missing the field share satellite 0, so the axis only pays when the field is near-universal in the lobe.
-
-**Emission order is a declared consequence.** A parent-bucket sweep emits `sat → z_order → seq` once the axis is live, so surfaces that read "the first N emitted" see a different N. This is why the axis is opt-in per lobe rather than a global format change — `docs/xytalk-spec.md` §2.2.2 carries the user-facing rules, including that `SET` re-places a record whose satellite field changed while `ON CONFLICT UPDATE` does not.
-
 | `spatial` | serialised records, one per write | `SpatialKey` (24 bytes) |
 | `identity` | pre-resolved link traversals (accelerates PULL) | `LID` (16 bytes) |
 | `dictionary` | anchor values, field-name dictionary, ghost metadata, LobeRegistry, pinned fields, gravity-field registry, vector-field registry, lightweight-ghost group rollups | tagged keys under reserved `[0xFF,0xF7..0xFE]` prefixes (enumerated and collision-checked in `reserved_keys.rs`) |
