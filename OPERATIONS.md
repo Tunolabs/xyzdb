@@ -289,6 +289,12 @@ Until a native OTel push exporter lands, Pattern B is the recommended approach.
 
 > The three `xyzdb_invariant_*` series are **correctness signals, not capacity metrics** — page, do not tune. They are emitted for every keyspace even at zero: a missing series is indistinguishable from a scrape gap, and "we did not look" must not read like "it did not happen".
 >
+> **This paragraph is the source for what the guards mean.** The same distinction is
+> needed in three other places and was wrong in all of them at once; the CHANGELOG
+> entry and `docs/mcp-integration.md` now point here instead of restating it. The MCP
+> `stats` tool description is a deliberate exception — an agent reading it cannot follow
+> a pointer — so it carries its own wording and has to be updated with this.
+>
 > They do not all mean the same thing when non-zero, and the difference decides what you do. `xyzdb_invariant_level_overlap_total` counts a state the read path assumes impossible — point reads can miss keys a scan still finds, so that one is an engine bug to report. `xyzdb_invariant_anchor_bloom_false_negative_total` counts a duplicate the guard **prevented**: the guard worked and no data was harmed, but the deployment is meeting the post-recovery bloom defect, so it is worth telling someone rather than worth panicking about.
 >
 > `xyzdb_recovered_from_wal` is different in kind again: it reports a degraded MODE (an anchor miss is re-confirmed without the bloom for the life of a process that replayed WAL), which is correct but costs a level descent per anchor miss until restart — published so slower writes can be explained instead of guessed.

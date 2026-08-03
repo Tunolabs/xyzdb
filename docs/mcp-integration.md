@@ -150,7 +150,7 @@ All five tools return JSON in the MCP standard `CallToolResult.content[0].text` 
 
 Snapshot of engine internals: keyspace stats (memtables, SSTables, compaction counters), block cache, ghosts, sync thread health, process and cgroup memory. Same shape as the `/stats` endpoint on `xyzdb-server`'s TCP port.
 
-Two fields are correctness signals, not capacity: `invariant_guards` (counters that never reset — a non-zero `level_overlap` means point reads can miss keys a scan still finds; a non-zero `anchor_bloom_false_negative` means the guard stopped a duplicate under a `UNIQUE` key after an unclean restart) and `recovered_from_wal` (the last start replayed the WAL, so the previous shutdown was unclean). See `OPERATIONS.md` for what to do about each.
+Two fields are correctness signals, not capacity: `invariant_guards` (counters that never reset) and `recovered_from_wal` (the last start replayed the WAL, so the previous shutdown was unclean). The guards do not all mean the same thing when non-zero — `OPERATIONS.md` §5 is the source for which one is an engine bug to report and which one means a guard did its job.
 
 No arguments. Sub-50 ms latency on every realistic data dir size.
 
