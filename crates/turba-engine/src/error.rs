@@ -70,10 +70,10 @@ impl fmt::Display for Error {
             Self::IncompatibleFormat { found, expected } => write!(
                 f,
                 "incompatible on-disk format: found version {found}, this build expects version {expected}. \
-                 Delete the data directory and re-ingest. \
-                 (v=1: v0.1 data. v=2: v0.2.0-alpha data — rejected due to Finding 4 / zone_maps u16 truncation. \
-                 v=3: v0.5.x and earlier; rejected by v0.6.0-pre because the gravity_hash width grew from 21 to 48 bits — \
-                 SpatialKey changed from 18 to 22 bytes. Recreate the dataset from source.)"
+                 The spatial key layout changed, so keys written under the older version cannot be \
+                 decoded by this build and there is no in-place migration. Recreate the dataset from \
+                 source into a fresh data directory. Every xyzDB release from 1.0 onwards writes \
+                 version 5, so a released build never produces a directory this build refuses."
             ),
             Self::Overloaded => write!(f, "write backpressure: engine overloaded"),
             Self::SnapshotExists(name) => {

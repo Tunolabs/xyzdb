@@ -3881,7 +3881,8 @@ fn test_scan_limit_hard_max_rejected() {
     assert_records(&r, 1);
 }
 
-/// CURSOR + ORDER BY is rejected: paginated sort is v0.3 scope.
+/// CURSOR + ORDER BY is rejected: the cursor resumes a key-ordered scan, so
+/// there is no position in it from which to resume a sorted page.
 #[test]
 fn test_scan_cursor_with_order_by_rejected() {
     let (engine, _dir) = temp_engine();

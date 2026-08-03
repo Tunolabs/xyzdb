@@ -93,8 +93,9 @@ fn execute_scan_inner(engine: &Engine, stmt: ScanStmt, cap: ScanCap) -> Result<S
 
     if stmt.cursor.is_some() && stmt.order_by.is_some() {
         return Err(XyzError::InvalidQuery(
-            "CURSOR with ORDER BY is not supported in v0.2.5.1; \
-             paginated sort lands in v0.3 with a dedicated cursor variant"
+            "CURSOR with ORDER BY is not supported: a cursor resumes a key-ordered \
+             scan, and a sorted page cannot be resumed from that position. Use a \
+             plain SCAN with ORDER BY and a LIMIT large enough for the whole result"
                 .into(),
         ));
     }

@@ -253,7 +253,7 @@ pub fn serialize_stats_to_prometheus(snapshot: &StatsSnapshot) -> String {
     // for Flush + Compaction when lane_admission_enabled = true).
     writeln!(
         &mut out,
-        "\n# HELP xyzdb_block_cache_admission_total Block cache admission decisions per lane (v0.4 cp 4.2.1)."
+        "\n# HELP xyzdb_block_cache_admission_total Block cache admission decisions per lane."
     )
     .ok();
     writeln!(&mut out, "# TYPE xyzdb_block_cache_admission_total counter").ok();
@@ -280,7 +280,7 @@ pub fn serialize_stats_to_prometheus(snapshot: &StatsSnapshot) -> String {
     }
     writeln!(
         &mut out,
-        "\n# HELP xyzdb_block_cache_lane_admission_enabled 1 if the v0.4 lane-aware admission policy is active, 0 if disabled."
+        "\n# HELP xyzdb_block_cache_lane_admission_enabled 1 if the lane-aware admission policy is active, 0 if disabled."
     )
     .ok();
     writeln!(

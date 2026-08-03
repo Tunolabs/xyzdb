@@ -126,8 +126,8 @@ pub fn warn_host_class(host: &str, class: HostClass) {
                 "xyzdb-mcp connecting to a non-private host. Ensure xyzdb-server has \
                  appropriate network ACLs and authentication. Public-facing xyzdb-server \
                  without auth is a security risk. See docs/mcp-integration.md threat model. \
-                 v0.2.7+ HTTP transport with TLS+auth is the canonical path for cross-network \
-                 deployments."
+                 For cross-network deployments the canonical path is TLS plus a bearer token \
+                 on xyzdb-server (--tls-cert/--tls-key and --auth-token)."
             );
         }
     }

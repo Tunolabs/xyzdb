@@ -540,8 +540,8 @@ where
 
     // Chunked streaming over a non-TcpStream (i.e. TLS): reject.
     if protocol::is_chunked_format(request.format) {
-        let err_msg =
-            "ERROR: chunked streaming format unsupported on this connection (v0.4 TLS limit)";
+        let err_msg = "ERROR: chunked streaming format unsupported on a TLS connection; \
+             use a non-chunked request format over TLS";
         if let Err(e) =
             protocol::write_response_bytes(stream, STATUS_ERROR, err_msg.as_bytes()).await
         {

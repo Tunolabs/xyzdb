@@ -110,9 +110,9 @@ impl GhostLobeManager {
                 DecodedMeta::UnknownFormat { found } => {
                     tracing::warn!(
                         "Skipping ghost metadata with unsupported format byte 0x{found:02X} \
-                         (current is 0x{current:02X}). This usually means the data dir was \
-                         written by an earlier v0.2-dev build with a different PersistedGhostMeta \
-                         schema. Recreate affected ghosts with `CREATE GHOST`.",
+                         (this build writes 0x{current:02X}). The data dir was written by a \
+                         build with a different ghost-metadata schema. Recreate the affected \
+                         ghosts with `CREATE GHOST`; no record data is involved.",
                         current = GHOST_META_FORMAT,
                     );
                     continue;
