@@ -259,7 +259,13 @@ chunk:   [len: u32 BE][payload: len bytes]                (write_chunk_sync, pro
 end:     [len: u32 BE = 0]                                (write_end_marker_sync, protocol.rs)
 ```
 
-A client that does not request a chunked format never sees this shape.
+A client that does not request a chunked format never sees this shape. **The server
+never escalates to it on its own** — no response size, no statement and no
+configuration selects a chunked frame; the only entry is the format byte you sent
+(`is_chunked_format(request.format)` is the single gate, `connection.rs`). So a client
+that always sends `JSON` cannot receive a shape it has no code for, which is why the
+three first-party clients implement the non-chunked path only and are not broken by
+the omission.
 
 **Chunked formats are plain-TCP only.** Over TLS the server refuses both chunked
 format bytes with a `STATUS_ERROR` frame reading `ERROR: chunked streaming format
