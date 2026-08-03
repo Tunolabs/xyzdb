@@ -1,5 +1,11 @@
 # Known issues — xyzDB engine
 
+**Audience**: anyone deciding whether a behaviour they hit is a defect, and anyone
+about to depend on one of these paths.
+**Surface**: the engine's own behaviour — query results, write semantics, recovery.
+Not operational tuning (`OPERATIONS.md`) and not language definition
+(`docs/xytalk-spec.md`), though an entry here overrides either when they disagree.
+
 Open defects and limitations we know about, in the engine itself. Written down here
 rather than left in a tracker so that a checkout carries them.
 
@@ -125,6 +131,45 @@ lookup goes through the anchor path.
 **What it costs you.** A pipeline that assumes the root is present can silently
 operate on a child. If you use `FIND | PULL` under concurrent write load, check the
 record type of what comes back rather than assuming position.
+
+---
+
+### `PUT BATCH … ON CONFLICT UPDATE` inserts a duplicate under a `UNIQUE` anchor
+
+**What.** In a batch, `ON CONFLICT UPDATE` neither updates the existing record nor
+skips the incoming one: it inserts it. The lobe ends up holding two records with the
+same value under a field declared `ANCHOR … UNIQUE`, which is the one thing that
+declaration exists to prevent. The single-statement `PUT … ON CONFLICT UPDATE` is
+correct and does update.
+
+**When.** Any batch whose record collides with an anchor value already stored, and
+any batch containing two records that share an anchor value. Both reproduce on 1.1
+in a few statements:
+
+```text
+LOBE "u"
+ANCHOR "k" UNIQUE IN "u"
+PUT BATCH IN "u" [{k: "x", v: 1}]
+PUT BATCH IN "u" [{k: "x", v: 2}] ON CONFLICT UPDATE   -- "1 records inserted"
+SCAN "u" WHERE k = "x" | AGGREGATE count()             -- 2
+```
+
+The same batch *without* `ON CONFLICT UPDATE` correctly errors with
+`Duplicate anchor 'k' = 'x'`, which is how we know the constraint check works and is
+being bypassed rather than missing.
+
+**Mechanism.** Established. The conflict branch does `continue`, intending to skip the
+record, but it sits inside the loop over the lobe's *anchor fields*, not the loop over
+*records* (`crates/engine/src/ops/put.rs`). With one anchor field the inner loop simply
+ends and the record is written.
+
+**What it costs you.** A duplicate that a later `FIND` on the anchor resolves to only
+one of, silently. If you batch upserts today, the updates are not happening. Use
+single `PUT … ON CONFLICT UPDATE` for anything that may collide, and batch only
+records whose anchor values are new. Which behaviour a batch upsert *should* have —
+skip, as the code intended, or update, matching the single-statement form — is a
+product decision that has not been made yet, which is why this is filed rather than
+patched.
 
 ---
 

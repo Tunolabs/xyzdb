@@ -337,7 +337,7 @@ PUT BATCH IN "tasks" [
   `InvalidQuery` error — no partial insert. To load more, split into chunks of
   ≤ 10,000; each chunk commits as its own atomic batch (atomicity is per-chunk,
   not across chunks).
-- `ON CONFLICT UPDATE` in batch: conflicting records are silently skipped
+- **`ON CONFLICT UPDATE` does not work in a batch — do not use it here.** The single-`PUT` form updates the existing record (§2.3); in a batch it neither updates nor skips: the conflicting record is **inserted anyway**, leaving two records with the same value under a `UNIQUE` anchor. Verified on 1.1. Batch a set of records whose anchor values are new, and route upserts through single `PUT … ON CONFLICT UPDATE`. Tracked in `KNOWN-ISSUES.md`.
 - Returns first LID, last LID, and count
 
 #### 2.5 FIND — Lookup Records
@@ -392,7 +392,7 @@ For a casual reader's view of how the engine picks the path automatically, see t
 
 `LIMIT` without `CURSOR` on a gravity-eligible predicate triggers the first-page paginated path automatically: the response is `PaginatedRecords` with a fresh cursor and `has_more`. Subsequent calls pass the cursor back unchanged. Anchor and FIND-LID shapes ignore `LIMIT` (single record returned regardless).
 
-A `NEAREST` whose bounded hydration was cut by the latency airbag (`--nearest-budget-ms`) also returns `PaginatedRecords` with `has_more = true` but **no cursor** — its scoring pass is not resumable. In that one case the frame additionally carries `budget_stop: { examined, candidates, found }` — the counts at the cut, defined and interpreted in §2.20. The field is **absent on every other** `PaginatedRecords` (cursor pages, SCAN caps), so those frames stay byte-identical and clients that key off `has_more` are unaffected.
+A `NEAREST` whose bounded hydration was cut by the latency airbag (`--nearest-budget-ms`) also returns `PaginatedRecords` with `has_more = true` but **no cursor** — its scoring pass is not resumable. In that one case the frame additionally carries `budget_stop: { candidates, examined, found, strategy }` — the counts at the cut plus which traversal produced the partial, defined and interpreted in §2.20. The field is **absent on every other** `PaginatedRecords` (cursor pages, SCAN caps), so those frames stay byte-identical and clients that key off `has_more` are unaffected.
 
 #### 2.5.1 FETCH — Multi-lobe co-located read (v1)
 
@@ -490,8 +490,8 @@ SCAN "creditos" WHERE rfc = "X" LIMIT 1000 CURSOR "AQEAAQ..."
 
 - The `CURSOR` token is opaque — postcard-encoded `CursorPayload { format_ver, lobe_id, last_spatial_key, filter_checksum }` wrapped in URL-safe base64 with no padding. Round-trip the token unchanged.
 - Reusing a cursor under a different `WHERE` clause errors with `cursor invalid: WHERE clause does not match the cursor's binding` (filter checksum is `xxh3_64` of the AST `Debug` form).
-- Result variant: `QueryResult::PaginatedRecords { records, cursor, has_more }`. Plain `Records` is preserved for SCANs that fit completely under the active `LIMIT`.
-- **Constraints**: `CURSOR` + `ORDER BY` rejected; `CURSOR` + ghost routing rejected (engine forces `ScanSource::Primary`). Both are post-v0.6 grammar scope (not in the v0.5.x mini-cycles or v0.6.0-pre format bump; deferred until a richer cursor payload is designed).
+- Result variant: `QueryResult::PaginatedRecords { records, cursor, has_more, budget_stop }`. `budget_stop` is `None` on every cursor page and every `LIMIT` cap — it is only ever set by a truncated `NEAREST` (§2.20). Plain `Records` is preserved for SCANs that fit completely under the active `LIMIT`.
+- **Constraints**: `CURSOR` + `ORDER BY` rejected; `CURSOR` + ghost routing rejected (engine forces `ScanSource::Primary`). Both are structural, not pending work: the token names a position in the spatial keyspace, which is neither a position in a sorted result nor one in a ghost's own order. Supporting either needs a different payload variant, and none is planned.
 - Cursor tokens are version-bound: an AST `Debug` change in a future release invalidates in-flight cursors. Treat them as ephemeral pagination state, not as durable handles.
 
 #### 2.7 SET — Update Fields
