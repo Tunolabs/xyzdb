@@ -44,6 +44,12 @@ COPY tools/ tools/
 # .v2 would give up ~the whole point of the v3 flip. Both is the only option that
 # needs no decision from whoever runs it.
 #
+# The intermediate target dir is deleted between the two builds. It costs nothing:
+# the differing RUSTFLAGS invalidate every artifact anyway, so the second build is
+# a full recompile either way — and keeping both would double the builder layer's
+# peak disk. Measured the hard way: the first dual build filled a 20 GB box and
+# died with "No space left on device" inside jemalloc's make.
+#
 # This is safe ONLY because the two builds are not two answers: v2 and v3 produce
 # byte-identical scores, gated in CI by crates/core/tests/score_bit_identity.rs.
 # If that gate ever goes, this dual-build has to go with it.
@@ -57,8 +63,10 @@ RUN set -e; \
       echo "xyzdb image: x86_64 — building BOTH v3 (AVX2) and v2 (baseline); the launcher selects at startup"; \
       cargo build --release -p xyzdb-server; \
       cp target/release/xyzdb-server /build/out/xyzdb-server.v3; \
+      rm -rf target/release; \
       RUSTFLAGS="-C target-cpu=x86-64" cargo build --release -p xyzdb-server; \
       cp target/release/xyzdb-server /build/out/xyzdb-server.v2; \
+      rm -rf target/release; \
     else \
       echo "xyzdb image: $ARCH — one build; the x86 flag is target-scoped and inert here"; \
       cargo build --release -p xyzdb-server; \
