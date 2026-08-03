@@ -47,7 +47,10 @@ xyz_manifest_version() {
   echo "FATAL: workspace Cargo.toml not found; refusing to tag an image without a version" >&2
   return 1
 }
-export XYZDB_IMG="${XYZDB_IMG:-xyzdb:$(xyz_manifest_version)-x86v3}"
+# No `-x86v3` suffix: the image carries BOTH the baseline and the AVX2 engine and
+# picks per host at startup, so a tag claiming v3 would say it only runs where v3
+# does. Same derived tag as every other runner here.
+export XYZDB_IMG="${XYZDB_IMG:-xyzdb:$(xyz_manifest_version)}"
 export BUILD_TIMEOUT="${BUILD_TIMEOUT:-300}"   # raise (e.g. 1200) for a definitive pg-246k build verdict
 
 say(){ echo "[provision] $*"; }
@@ -102,12 +105,24 @@ PYTHONPATH="$REPO/examples/client/python" "$PY" -c "import xyzdb_minimal" 2>/dev
 
 # --- xyzDB engine image: build from this checkout if absent (or if REBUILD_IMG=1) ---
 if [ "${REBUILD_IMG:-0}" = 1 ] || ! docker image inspect "$XYZDB_IMG" >/dev/null 2>&1; then
-  say "building engine image $XYZDB_IMG from $REPO (x86-v3 / AVX2)"
-  docker build -t "$XYZDB_IMG" --build-arg XYZ_IMAGE_VARIANT=x86-v3 "$REPO" || fail "docker build of $XYZDB_IMG failed"
+  say "building engine image $XYZDB_IMG from $REPO (dual ISA: baseline + AVX2, selected at startup)"
+  # XYZ_IMAGE_VARIANT is deliberately not passed: it would stamp the image
+  # `x86-v3`, and on x86_64 this image also carries the baseline engine. The
+  # Dockerfile labels it `runtime-selected` and records the real fact in
+  # org.xyzdb.isa-selection.
+  docker build -t "$XYZDB_IMG" "$REPO" || fail "docker build of $XYZDB_IMG failed"
 fi
 
 # --- rival images: pull if absent ---
-for img in pgvector/pgvector:pg18 qdrant/qdrant:latest chromadb/chroma:latest; do
+# Only the rivals this run actually deploys. Pulling all three for a
+# DEPLOYMENTS_RUN=xyz run cost 1.2 GB of images and helped fill a 20 GB box.
+if [ "${DEPLOYMENTS_RUN:-}" = "xyz" ]; then
+  rivals=""
+  say "DEPLOYMENTS_RUN=xyz — skipping the rival images (nothing in this run uses them)"
+else
+  rivals="pgvector/pgvector:pg18 qdrant/qdrant:latest chromadb/chroma:latest"
+fi
+for img in $rivals; do
   docker image inspect "$img" >/dev/null 2>&1 || { say "pulling $img"; docker pull "$img" || fail "docker pull $img failed"; }
 done
 

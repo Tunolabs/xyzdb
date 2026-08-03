@@ -11,7 +11,23 @@
 # Building the corpus from scratch (build_lme.py) needs the heavier deps in
 # requirements-corpus.txt — skip those if you rsync a prebuilt corpora/lme/.
 
-numpy==2.0.2
+# NOT an exact pin, and the reason is a from-scratch install that failed:
+# numpy 2.0.2 has no wheel for Python 3.14, which is the ONLY interpreter in
+# Ubuntu 26.04's archive (no 3.11/3.12/3.13 to fall back to). pip therefore built
+# from source and died in meson, so the documented one-command provisioning could
+# not complete on a current LTS. A floor keeps old interpreters working and lets a
+# new one resolve to a wheel.
+#
+# numpy is used here for the corpus arrays (load, slice, dot) — no API surface
+# that moved between 2.0 and 2.5 — so the range does not change what is measured.
+# The vectors themselves are byte-identical: they are read from cvec.npy/qvec.npy,
+# not recomputed. What IS embedder-version-sensitive is building the corpus, and
+# that is pinned separately in requirements-corpus.txt.
+numpy>=2.0.2
+# The four below are RIVAL clients. A DEPLOYMENTS_RUN=xyz run needs none of them
+# (the xyzDB client is the stdlib-only reference client in examples/), but pip
+# installs the file as a whole, so one rival client that cannot build on your
+# platform blocks an xyzDB-only run. If that happens, install numpy alone.
 psycopg2-binary==2.9.12       # pgvector adapter
 pgvector==0.4.2               # pgvector vector-type registration
 qdrant-client==1.16.1         # qdrant adapter
