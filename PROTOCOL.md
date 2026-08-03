@@ -271,6 +271,14 @@ pages with a cursor (§8.1) instead.
 
 ## 10. Frame size limit
 
+**Value nesting depth.** A client that sends records in a binary format (V3 bulk
+load, or the BINARY format) serialises the values itself, so it can nest `List` /
+`Map` deeper than the language allows. Decoding rejects anything deeper than **32**
+levels (`MAX_DECODE_DEPTH` in `crates/core/src/value.rs`); the cap exists because
+the binary formats impose no depth limit of their own and a deep enough payload
+would overflow the worker stack. For comparison, the xyTalk literal grammar caps at
+16 and a real record sits at depth 3–4, so only adversarial input meets this.
+
 `MAX_FRAME_SIZE = 16 * 1024 * 1024` (16 MiB) (`protocol.rs`). It bounds each
 length-prefixed field. A request `len` (or a V4 `params_len`, or a V3
 `payload_len`, or a response `len`) that exceeds it is rejected with an

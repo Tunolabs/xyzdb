@@ -23,7 +23,7 @@ xyTalk is the query language for xyzDB, a context database built on top of `turb
 
 ### Values
 
-xyTalk supports 11 data types:
+A field value is one of **10** stored types:
 
 | Type | Literal Syntax | Rust Type | Examples |
 |------|---------------|-----------|---------|
@@ -33,11 +33,16 @@ xyTalk supports 11 data types:
 | Bool | `true` or `false` | bool | `true`, `false` |
 | Null | `null` | — | `null` |
 | Timestamp | `@"2026-04-01"` | i64 (microseconds) | `@"2026-01-15"` |
-| LID | `LID("NNNN:LLLL:...")` | u128 | `LID("0000:0001:0001A2B3C4D5:00000001:0000")` |
 | List | `[val, val, ...]` | Vec\<Value\> | `["tech", "saas"]`, `[1, 2, 3]` |
 | Map | `{key: val, ...}` | BTreeMap\<String, Value\> | `{bureau: 685, risk: "low"}` |
 | Vector | `[0.1, -0.4, ...]` (float list, len ≥ 64) | Vec\<f32\> | Dense f32 embedding; see §2.20 |
 | Bytes | (binary only) | Vec\<u8\> | No literal syntax; binary protocol only |
+
+**`LID("…")` is a literal, not an eleventh type.** It is accepted anywhere a value
+is, and **stored as Text** — the printed form, verbatim. The 128-bit LID itself is
+the engine's record identifier, not a field value type: a field holding a LID
+compares, sorts and reads back as the string. Use it to reference another record
+(`FIND "lobe" WHERE parent = LID("…")`), not as a numeric.
 
 **Type inference:** Determined by literal syntax. `"123"` is Text, `123` is Int, `123.0` is Float.
 
