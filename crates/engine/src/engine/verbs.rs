@@ -1,5 +1,62 @@
 use super::*;
 
+/// One line `SHOW PROFILE` can emit.
+///
+/// It exists so the set is **enumerable and therefore checkable**. `label()` has no
+/// wildcard arm, so adding a line does not compile until someone names it, and the
+/// test at the bottom of this file then fails until `docs/xytalk-spec.md` §2.19
+/// documents it. `Gravity:` was added in 1.1.0 and §2.19 was not updated with it;
+/// nothing could have caught that while the labels were bare format strings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum ProfileLine {
+    Gravity,
+    Pinned,
+    Vector,
+    Satellite,
+    Learned,
+    Ghosts,
+}
+
+impl ProfileLine {
+    /// The line's prefix, indent included. Exhaustive on purpose.
+    fn label(self) -> &'static str {
+        match self {
+            ProfileLine::Gravity => "  Gravity:",
+            ProfileLine::Pinned => "  Pinned:",
+            ProfileLine::Vector => "  Vector:",
+            ProfileLine::Satellite => "  Satellite:",
+            ProfileLine::Learned => "  Learned:",
+            ProfileLine::Ghosts => "  Ghosts:",
+        }
+    }
+
+    /// Every variant. Kept beside `label` so the compiler error that lands there
+    /// puts whoever adds a line in front of this list too.
+    const ALL: [ProfileLine; Self::COUNT] = [
+        ProfileLine::Gravity,
+        ProfileLine::Pinned,
+        ProfileLine::Vector,
+        ProfileLine::Satellite,
+        ProfileLine::Learned,
+        ProfileLine::Ghosts,
+    ];
+
+    /// Number of variants. A new one makes `label` fail to compile; fixing that
+    /// lands here, and `ALL` is length-checked against it.
+    const COUNT: usize = 6;
+
+    /// `"  Label: (none)"` — the shape every three-state line uses when the lobe
+    /// declares nothing.
+    fn none(self) -> String {
+        format!("{} (none)", self.label())
+    }
+
+    /// `"  Label: <value>"`.
+    fn with(self, value: impl std::fmt::Display) -> String {
+        format!("{} {}", self.label(), value)
+    }
+}
+
 impl Engine {
     // ── ANCHOR ────────────────────────────────────────────────────────────
 
@@ -293,6 +350,10 @@ impl Engine {
         })
     }
 
+    /// `SHOW PROFILE "lobe"` — every declaration the lobe carries, one line each.
+    ///
+    /// Line labels come from [`ProfileLine`] rather than being written inline, so
+    /// the set is enumerable and a test can hold `docs/xytalk-spec.md` §2.19 to it.
     fn execute_show_profile(&self, lobe: &str) -> Result<QueryResult> {
         let lobes = self.lobe_registry.read();
         if lobes.get(lobe).is_none() {
@@ -312,8 +373,8 @@ impl Engine {
         // Same three-state shape as `Vector:` and `Satellite:`, so the parser on
         // the other side reads it the same way.
         match self.get_gravity_spec(lobe) {
-            Some(spec) => lines.push(format!("  Gravity: {}", spec.fields().join(", "))),
-            None => lines.push("  Gravity: (none)".into()),
+            Some(spec) => lines.push(ProfileLine::Gravity.with(spec.fields().join(", "))),
+            None => lines.push(ProfileLine::Gravity.none()),
         }
 
         // Pinned fields
@@ -321,12 +382,12 @@ impl Engine {
         let pinned = pins.get(lobe);
         if let Some(fields) = pinned {
             if fields.is_empty() {
-                lines.push("  Pinned: (none)".into());
+                lines.push(ProfileLine::Pinned.none());
             } else {
-                lines.push(format!("  Pinned: {}", fields.join(", ")));
+                lines.push(ProfileLine::Pinned.with(fields.join(", ")));
             }
         } else {
-            lines.push("  Pinned: (none)".into());
+            lines.push(ProfileLine::Pinned.none());
         }
         drop(pins);
 
@@ -334,10 +395,12 @@ impl Engine {
         // states are distinguishable — declared+dim, declared+unknown, none.
         match self.get_vector_spec(lobe) {
             Some(spec) => match spec.dim {
-                Some(d) => lines.push(format!("  Vector: {} dim {}", spec.field, d)),
-                None => lines.push(format!("  Vector: {} dim unknown", spec.field)),
+                Some(d) => {
+                    lines.push(ProfileLine::Vector.with(format!("{} dim {}", spec.field, d)))
+                }
+                None => lines.push(ProfileLine::Vector.with(format!("{} dim unknown", spec.field))),
             },
-            None => lines.push("  Vector: (none)".into()),
+            None => lines.push(ProfileLine::Vector.none()),
         }
 
         // Sub-gravity axis (if declared). Additive line, same three-state shape as
@@ -348,8 +411,8 @@ impl Engine {
         // choose the cheap shape, so hiding it hides a capability rather than a
         // detail.
         match self.get_satellite_spec(lobe) {
-            Some(spec) => lines.push(format!("  Satellite: {}", spec.field)),
-            None => lines.push("  Satellite: (none)".into()),
+            Some(spec) => lines.push(ProfileLine::Satellite.with(spec.field)),
+            None => lines.push(ProfileLine::Satellite.none()),
         }
 
         // Learned fields from telemetry
@@ -361,9 +424,11 @@ impl Engine {
             .cloned()
             .collect();
         if learned.is_empty() {
-            lines.push("  Learned: (no scan patterns yet)".into());
+            lines.push(ProfileLine::Learned.with("(no scan patterns yet)"));
         } else {
-            lines.push("  Learned patterns:".into());
+            // Same label as the empty case: a caller parsing this block should not
+            // have to know two spellings of one line.
+            lines.push(ProfileLine::Learned.with(format!("{} pattern(s)", learned.len())));
             for l in &learned {
                 lines.push(format!("    {l}"));
             }
@@ -373,9 +438,9 @@ impl Engine {
         let ghosts = self.ghost_manager.list();
         let lobe_ghosts: Vec<_> = ghosts.iter().filter(|g| g.source_lobe == lobe).collect();
         if lobe_ghosts.is_empty() {
-            lines.push("  Ghosts: (none)".into());
+            lines.push(ProfileLine::Ghosts.none());
         } else {
-            lines.push(format!("  Ghosts: {} active", lobe_ghosts.len()));
+            lines.push(ProfileLine::Ghosts.with(format!("{} active", lobe_ghosts.len())));
             for g in &lobe_ghosts {
                 lines.push(format!(
                     "    {} — {} records, {} filters",
@@ -610,5 +675,61 @@ impl Engine {
                 ),
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod profile_line_docs {
+    //! `SHOW PROFILE`'s line set versus what §2.19 of the spec documents.
+    //!
+    //! The failure this closes: `Gravity:` was added to the profile in 1.1.0 and
+    //! §2.19 kept describing the old four lines. Nothing could catch it — the
+    //! labels were inline format strings, so there was no set to compare against.
+    //! Now there is one, `label()` has no wildcard arm, and a new line fails to
+    //! compile until it is named and documented.
+
+    use super::ProfileLine;
+
+    /// The spec, read from the repo rather than duplicated here: a copy would go
+    /// stale in exactly the way this test exists to prevent.
+    fn spec() -> String {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/xytalk-spec.md");
+        std::fs::read_to_string(path)
+            .unwrap_or_else(|e| panic!("cannot read the spec at {path}: {e}"))
+    }
+
+    #[test]
+    fn all_covers_every_variant() {
+        let distinct: std::collections::HashSet<_> = ProfileLine::ALL.iter().collect();
+        assert_eq!(
+            distinct.len(),
+            ProfileLine::COUNT,
+            "ProfileLine::ALL must list every variant exactly once"
+        );
+    }
+
+    #[test]
+    fn every_emitted_line_is_documented() {
+        let spec = spec();
+        for line in ProfileLine::ALL {
+            // The label carries its indent; the spec quotes it inside a fenced
+            // block, so match on the trimmed label plus its colon.
+            let needle = line.label().trim();
+            assert!(
+                spec.contains(needle),
+                "SHOW PROFILE emits `{needle}` and docs/xytalk-spec.md never mentions \
+                 it — document the line in §2.19 or stop emitting it"
+            );
+        }
+    }
+
+    /// Negative control. Without it, a `contains` that matched everything would
+    /// look exactly like a healthy gate.
+    #[test]
+    fn the_check_can_fail() {
+        assert!(
+            !spec().contains("Sublimation:"),
+            "control string leaked into the spec; pick another"
+        );
     }
 }

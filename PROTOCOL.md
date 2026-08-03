@@ -279,6 +279,19 @@ the binary formats impose no depth limit of their own and a deep enough payload
 would overflow the worker stack. For comparison, the xyTalk literal grammar caps at
 16 and a real record sits at depth 3–4, so only adversarial input meets this.
 
+**This number is where your client rejects, not just how much it allocates.** A
+response `len` is read before the body, so a client that allocates from `len` and only
+then reads is trusting a number that arrived over the socket. Check `len` against 16
+MiB **before** allocating, and treat a larger value as a protocol error — not as a
+large-but-valid frame. Getting the bound wrong widens what the client accepts: a
+client sized against a limit larger than the server's would accept a `len` the server
+never emits, which is precisely how one malformed length becomes one enormous
+allocation. A client doing `buffer = new byte[len]` with no comparison has that hole.
+The reference client checks both directions — the outgoing statement and `params`
+before sending, and the announced response `len` before reading the body
+([`xyzdb_minimal.py`](examples/client/python/xyzdb_minimal.py), `execute`). It checked
+only the outgoing side until 1.1.0.
+
 `MAX_FRAME_SIZE = 16 * 1024 * 1024` (16 MiB) (`protocol.rs`). It bounds each
 length-prefixed field. A request `len` (or a V4 `params_len`, or a V3
 `payload_len`, or a response `len`) that exceeds it is rejected with an

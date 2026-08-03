@@ -1008,7 +1008,9 @@ SHOW THROTTLE
     Ghosts: (none)
   ```
 
-  `Gravity:` names the primary co-location axis (§2.2.1) and is the one to read first — a query pinning it reads one bucket, one that does not sweeps the lobe. `Satellite:` names the sub-gravity axis (§2.2.2), which is a sub-range *of* that bucket and only means something alongside a declared gravity. `Vector:` is `<field> dim <n>`, or `dim unknown` before the first embedding fixes the dimension (§2.20). Each of the three reads `(none)` when the lobe declares it not. `Pinned:` lists pinned fields (§2.18) — a projection, unrelated to anchors, which do not appear here at all. `Learned:` is the scan patterns observed for this lobe and `Ghosts:` the active ghosts, with a `[projected]` marker for fields stored on the ghost entry.
+  `Gravity:` names the primary co-location axis (§2.2.1) and is the one to read first — a query pinning it reads one bucket, one that does not sweeps the lobe. `Satellite:` names the sub-gravity axis (§2.2.2), which is a sub-range *of* that bucket and only means something alongside a declared gravity. `Vector:` is `<field> dim <n>`, or `dim unknown` before the first embedding fixes the dimension (§2.20). Each of the three reads `(none)` when the lobe declares it not. `Pinned:` lists pinned fields (§2.18) — a projection, unrelated to anchors, which do not appear here at all. `Learned:` is the scan patterns observed for this lobe and `Ghosts:` the active ghosts, with a `[projected]` marker for fields stored on the ghost entry. Both count when non-empty (`Learned: 3 pattern(s)`, `Ghosts: 2 active`) and list their entries on following indented lines.
+
+> The set of lines is gated: `SHOW PROFILE` cannot emit a label this section does not mention. `ProfileLine` in `engine/verbs.rs` enumerates them with no wildcard arm, so a new line fails to compile until it is named, and a test then fails until it is documented here.
 - `SHOW THROTTLE` — current write throttle state across all lobes (Healthy / Degraded / Critical / Paused) and the active throttle profile (`balanced`, `transactional`, `analytical`, `bulk`, `maintenance` — see §6).
 
 #### 2.20 VECTOR / NEAREST — Searchable embeddings (v0.8)
@@ -1296,7 +1298,7 @@ Any other predicate disqualifies the ghost from PreComputed; the router falls ba
 | `SCAN ... WHERE _type = "Credit" AND status = "active" \| GROUP BY rfc \| AGGREGATE sum(monto), count()` | `Primary` | `status` is neither ghost-constant nor a group key |
 | `SCAN ... WHERE _type = "Credit" AND rfc > "M" \| GROUP BY rfc \| AGGREGATE sum(monto), count()` | `Primary` | range op on group key, not Eq |
 
-This guarantees the pre-computed group entries returned to the caller satisfy every `WHERE` clause — not just those covered by the ghost definition. Range operators on group keys (`!=`, `<`, `<=`, `>`, `>=`, `IN`) disqualify the ghost and route to `Primary`. Widening that set is possible but **not planned**: a query the ghost cannot answer exactly is cheaper to answer from `Primary` than to answer wrongly from the ghost.
+This guarantees the pre-computed group entries returned to the caller satisfy every `WHERE` clause — not just those covered by the ghost definition. Range operators on group keys (`!=`, `<`, `<=`, `>`, `>=`, `IN`) disqualify the ghost and route to `Primary`. Widening that set is **not planned**; the reason lives with the code, on `read_precomputed` in `crates/engine/src/ghost/read.rs`, which is the source for this rule. If this paragraph and that doc comment ever disagree, the doc comment is right.
 
 **Routing is transparent** — the query text is the same regardless of which source serves it. Operators inspect routing decisions via `SHOW SCAN STATS` (§2.19) and the `/stats` endpoint.
 
@@ -1378,7 +1380,7 @@ A side `/stats` HTTP-style endpoint on the same TCP port emits a JSON snapshot o
 | count() only | No count(field), count(DISTINCT). `count(*)` is an accepted alias of `count()` |
 | CONTAINS only on List | No substring search on Text, no key search on Map |
 | Ghost routing AND-only | OR/NOT queries always scan primary keyspace |
-| PreComputed group-key Eq only | Non-`Eq` operators on `GROUP BY` fields disqualify the ghost from PreComputed and route to Primary (§5). Widening the set is not planned — a query the ghost cannot answer exactly is cheaper from Primary than wrong from the ghost. |
+| PreComputed group-key Eq only | Non-`Eq` operators on `GROUP BY` fields disqualify the ghost from PreComputed and route to Primary (§5). Widening the set is not planned; reason at the source, `read_precomputed` in `crates/engine/src/ghost/read.rs`. |
 | Cursor + ORDER BY rejected | A cursor names a position in the spatial keyspace, which is not a position in a sorted result. A different payload variant would be needed; none is planned (§2.6). |
 | Cursor + ghost routing rejected | Same reason: a spatial-key position says nothing about where to resume inside a ghost's own order. The engine forces `ScanSource::Primary` when a cursor is present (§2.6). |
 | Null = Null is TRUE | Differs from SQL standard (see Null Semantics section) |

@@ -129,6 +129,16 @@ class Client:
             raise ConnectionError(f"Send failed: {e}")
         header = self._recv_exact(5)
         status, length = header[0], struct.unpack(">I", header[1:5])[0]
+        # `length` arrived over the socket, so bound it BEFORE reading that many
+        # bytes. The server never emits a frame past MAX_FRAME_SIZE, so a larger
+        # value is a protocol error, not a big-but-valid response — and reading it
+        # anyway is how one malformed length turns into unbounded memory.
+        if length > MAX_FRAME_SIZE:
+            raise XyzDBError(
+                f"server announced a {length}-byte frame, over the 16 MiB limit; "
+                "refusing to read it",
+                code="FRAME_TOO_LARGE",
+            )
         body = self._recv_exact(length)
         if status == STATUS_ERROR:
             try:

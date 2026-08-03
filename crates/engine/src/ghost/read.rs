@@ -214,6 +214,11 @@ impl GhostLobeManager {
     /// Primary. Widening the set is possible but not planned — a query
     /// the ghost cannot answer exactly is cheaper to answer from Primary
     /// than to answer wrongly from the ghost.
+    ///
+    /// **This doc comment is the source for that rule.** It was stated in four
+    /// places (here, `docs/architecture.md` §PreComputed, and the spec's §5 and
+    /// §8) and all four drifted onto a version that had shipped without it.
+    /// The other three now point here; change this one and they follow.
     pub fn read_precomputed(
         &self,
         name: &str,

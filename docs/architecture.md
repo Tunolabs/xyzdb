@@ -341,7 +341,7 @@ Ghosts created with `GROUP BY <field> AGGREGATE func()` clauses persist per-grou
 
 Any other predicate disqualifies the ghost from PreComputed; the router falls back to `Primary` (or to `Ghost` if a non-PreComputed match exists). This guarantees the pre-computed group entries returned to the caller satisfy every `WHERE` clause in the query, not just those covered by the ghost definition.
 
-**Operator support**: PreComputed honours `=` only on group keys. Non-Eq predicates on group keys (`!=`, `<`, `<=`, `>`, `>=`, `IN`) disqualify the ghost from PreComputed and route to Primary. Widening the set is possible but not planned: a query the ghost cannot answer exactly is cheaper to answer from Primary than to answer wrongly from the ghost. Same wording as the `read_precomputed` doc comment it describes.
+**Operator support**: PreComputed honours `=` only on group keys. Non-Eq predicates on group keys (`!=`, `<`, `<=`, `>`, `>=`, `IN`) disqualify the ghost from PreComputed and route to Primary. Widening the set is possible but not planned, for the reason stated at the source: the doc comment on `read_precomputed` (`crates/engine/src/ghost/read.rs`), which this paragraph describes. If the two disagree, the doc comment is right.
 
 **Two matching passes** still run in sequence:
 
