@@ -1,0 +1,21 @@
+[package]
+name = "xyzdb-launch"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# No dependencies on purpose. This binary is the first thing the container runs,
+# it is compiled at the baseline ISA so it starts on any x86-64, and every crate
+# it linked would be another thing that has to start there too.
+[dependencies]
+
+# Never inherit `target-cpu=x86-64-v3` from `.cargo/config.toml`: the whole point
+# of this binary is to run on a CPU that may not have those instructions and then
+# pick the engine that does. The Dockerfile builds it with an explicit baseline
+# RUSTFLAGS, and `container-launcher-baseline.rs` asserts the guarantee holds.
+[[bin]]
+name = "xyzdb-launch"
+path = "src/main.rs"

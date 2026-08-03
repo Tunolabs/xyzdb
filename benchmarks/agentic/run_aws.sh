@@ -47,7 +47,7 @@ clean_disk(){ [ -n "$STORAGE_ROOT" ] || return 0; case "$STORAGE_ROOT/bench_$1" 
 up_xyzdb(){ # $1=image $2=mem $3=cache
   local img=$1 mem=$2 cache=$3 c=bench-xyzdb; docker rm -f "$c" >/dev/null 2>&1; clean_disk xyzdb
   docker run -d --name "$c" --cpus 2 --memory "$mem" -p 2505:2505 $(mount_arg xyzdb) "$img" \
-    --port 2505 --path /data/bench --bind 0.0.0.0 --cache-size "$cache" --nearest-budget-ms 0 >/dev/null 2>&1
+    --port 2505 --path /data/bench --bind 0.0.0.0 --insecure-allow-no-auth --cache-size "$cache" --nearest-budget-ms 0 >/dev/null 2>&1
   local i=0; while [ $i -lt 120 ]; do nc -z 127.0.0.1 2505 2>/dev/null && return 0; i=$((i+1)); sleep 1; done; return 1; }
 
 up_rival(){ # $1=engine $2=env

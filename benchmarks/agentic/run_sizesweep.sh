@@ -16,7 +16,7 @@ up(){ # $1=engine $2=image(xyzdb only)
   local e=$1 img=${2:-} c=bench-$1
   docker rm -f "$c" >/dev/null 2>&1; docker volume rm "bench_$1" >/dev/null 2>&1
   case "$e" in
-    xyzdb)    docker run -d --name "$c" --cpus 2 --memory 8g -p 2505:2505 -v "bench_$1:/data" "$img" --port 2505 --path /data/bench --bind 0.0.0.0 --cache-size 512 >/dev/null 2>&1;;
+    xyzdb)    docker run -d --name "$c" --cpus 2 --memory 8g -p 2505:2505 -v "bench_$1:/data" "$img" --port 2505 --path /data/bench --bind 0.0.0.0 --insecure-allow-no-auth --cache-size 512 >/dev/null 2>&1;;
     pgvector) docker run -d --name "$c" --cpus 2 --memory 8g -p 5432:5432 -e POSTGRES_PASSWORD=bench -v "bench_$1:/var/lib/postgresql" pgvector/pgvector:pg18 >/dev/null 2>&1;;
     qdrant)   docker run -d --name "$c" --cpus 2 --memory 8g -p 6333:6333 -v "bench_$1:/qdrant/storage" qdrant/qdrant:latest >/dev/null 2>&1;;
     chroma)   docker run -d --name "$c" --cpus 2 --memory 8g -p 8000:8000 -v "bench_$1:/data" chromadb/chroma:latest >/dev/null 2>&1;;

@@ -70,7 +70,7 @@ up(){   # $1=engine $2=mem $3=cpus $4=cache  -> 0 ready / 1 not
   mnt="$src:$dd"
   case "$e" in
     xyzdb)    docker run -d --name "$c" --cpus "$cpus" --memory "$mem" -p 2505:2505 -v "$mnt" \
-                "$XYZDB_IMG" --port 2505 --path /data/bench --bind 0.0.0.0 --cache-size "$cache" >/dev/null 2>&1 ;;
+                "$XYZDB_IMG" --port 2505 --path /data/bench --bind 0.0.0.0 --insecure-allow-no-auth --cache-size "$cache" >/dev/null 2>&1 ;;
     pgvector) docker run -d --name "$c" --cpus "$cpus" --memory "$mem" -p 5432:5432 -e POSTGRES_PASSWORD=bench \
                 -v "$mnt" pgvector/pgvector:pg18 >/dev/null 2>&1 ;;
     qdrant)   docker run -d --name "$c" --cpus "$cpus" --memory "$mem" -p 6333:6333 -v "$mnt" \

@@ -31,7 +31,29 @@ TIER_DEV="2c8g 8g 8g 2 2048"
 # single measured image going forward ("what image do I measure?" — premise-20). The
 # prior default (xyzdb:0.9-v3-arm64-dev, 2026-07-05) predated xyTalk v1 and the fix.
 # Override via XYZDB_IMG.
-IMG_XYZDB="${XYZDB_IMG:-xyzdb:0.9.6-fixA}"
+# Engine image tag: DERIVED from the workspace manifest, never hardcoded. Four
+# scripts here used to carry a literal default and they had drifted to two
+# different stale versions (0.9.6-fixA and 0.9.8-x86v3) while the repo was at
+# 1.1.0 — and this tag is baked into every record's `envelope` field, so the
+# provenance stamp in the data named an engine that did not run. Deriving it
+# cannot go stale.
+xyz_manifest_version() {
+  # Walk up from this script's directory until the workspace manifest appears.
+  # No path arithmetic: the earlier version assumed ../.. and returned an empty
+  # string in three of the four scripts, which would have tagged an image
+  # `xyzdb:` with no version at all.
+  local d; d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  while [ "$d" != "/" ]; do
+    if [ -f "$d/Cargo.toml" ] && grep -q "^\[workspace\]" "$d/Cargo.toml"; then
+      awk '/^\[workspace\.package\]/{f=1;next} /^\[/{f=0} f&&/^version[ 	]*=/{gsub(/[^0-9.]/,"");print;exit}' "$d/Cargo.toml"
+      return 0
+    fi
+    d="$(dirname "$d")"
+  done
+  echo "FATAL: workspace Cargo.toml not found; refusing to tag an image without a version" >&2
+  return 1
+}
+IMG_XYZDB="${XYZDB_IMG:-xyzdb:$(xyz_manifest_version)}"
 export XYZDB_IMG="$IMG_XYZDB"   # so measure_*.py bench_stamp() records the exact image
 IMG_PG="${PG_IMG:-pgvector/pgvector:pg18}"
 IMG_QDRANT="${QDRANT_IMG:-qdrant/qdrant:latest}"

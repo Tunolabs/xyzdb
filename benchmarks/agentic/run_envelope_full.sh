@@ -35,7 +35,29 @@ export PYTHONPATH="${PYTHONPATH:-$_CLIENTS}:$AG"
 # footprint, wiped between cells — xyzDB has no drop_lobe so the dir MUST start empty). Empty = Mac
 # named volumes (docker-managed). STORAGE just labels ssd/hdd in the disk record.
 STORAGE_ROOT="${STORAGE_ROOT:-}"; STORAGE="${STORAGE:-ssd}"
-export XYZDB_IMG="${XYZDB_IMG:-xyzdb:0.9.6-fixA}"
+# Engine image tag: DERIVED from the workspace manifest, never hardcoded. Four
+# scripts here used to carry a literal default and they had drifted to two
+# different stale versions (0.9.6-fixA and 0.9.8-x86v3) while the repo was at
+# 1.1.0 — and this tag is baked into every record's `envelope` field, so the
+# provenance stamp in the data named an engine that did not run. Deriving it
+# cannot go stale.
+xyz_manifest_version() {
+  # Walk up from this script's directory until the workspace manifest appears.
+  # No path arithmetic: the earlier version assumed ../.. and returned an empty
+  # string in three of the four scripts, which would have tagged an image
+  # `xyzdb:` with no version at all.
+  local d; d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  while [ "$d" != "/" ]; do
+    if [ -f "$d/Cargo.toml" ] && grep -q "^\[workspace\]" "$d/Cargo.toml"; then
+      awk '/^\[workspace\.package\]/{f=1;next} /^\[/{f=0} f&&/^version[ 	]*=/{gsub(/[^0-9.]/,"");print;exit}' "$d/Cargo.toml"
+      return 0
+    fi
+    d="$(dirname "$d")"
+  done
+  echo "FATAL: workspace Cargo.toml not found; refusing to tag an image without a version" >&2
+  return 1
+}
+export XYZDB_IMG="${XYZDB_IMG:-xyzdb:$(xyz_manifest_version)}"
 XYZ_ARCH="${XYZ_ARCH:-arm}"
 IMG_XYZ="$XYZDB_IMG"
 export BENCH_PG_M=48 BENCH_PG_EFC=200 BENCH_PG_EFS=200 \
@@ -159,7 +181,7 @@ cell(){ # $1=deployment $2=tier $3=scenario(s1|s2|s3|s4|s5|s6) $4=N
   echo "[$(date +%H:%M:%S)] $t $sc n=$N $dep  (dram=$dram cpus=$cpus engines=$n_eng conts=${conts[*]})"
   local tb; tb=$(date +%s)
   if ! up_deploy "$dep" "$t"; then
-    "$PY" -c "import json;open('$out','a').write(json.dumps({'kind':'$sc','deployment':'$dep','tier':'$t','envelope':'$envlbl','base_n':$N,'n_engines':$n_eng,'status':'deployment_did_not_start','verdict':'OOM','phase':'boot'})+chr(10))"
+    "$PY" -c "import json;open('$out','a').write(json.dumps({'kind':'$sc','deployment':'$dep','tier':'$t','envelope':'$envlbl','base_n':$N,'n_engines':$n_eng,'status':'deployment_did_not_start','verdict':'BOOT_FAILED','phase':'boot','note':'a deployment that did not start is not an OOM; the kernel did not report one'})+chr(10))"
     down_all; echo "  -> OOM (deployment no arranca)"; return; fi
   local boot_s=$(( $(date +%s) - tb ))
 

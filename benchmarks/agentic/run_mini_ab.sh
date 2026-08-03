@@ -31,7 +31,7 @@ up(){   # $1=image $2=mem $3=cpus $4=cache
   find "$DATADIR/xyzdb" -mindepth 1 -delete 2>/dev/null || true; mkdir -p "$DATADIR/xyzdb"
   docker run -d --name "$CONT" --cpus "$3" --memory "$2" -p 2505:2505 \
     -v "$DATADIR/xyzdb:/data" "$1" \
-    --port 2505 --path /data/bench --bind 0.0.0.0 --cache-size "$4" >/dev/null 2>&1
+    --port 2505 --path /data/bench --bind 0.0.0.0 --insecure-allow-no-auth --cache-size "$4" >/dev/null 2>&1
   local i=0; while [ $i -lt 40 ]; do nc -z 127.0.0.1 2505 2>/dev/null && { sleep 1; return 0; }; i=$((i+1)); sleep 1; done
   return 1
 }

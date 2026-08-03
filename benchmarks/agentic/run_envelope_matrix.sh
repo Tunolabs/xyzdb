@@ -27,7 +27,29 @@
 set -uo pipefail
 AG="$(cd "$(dirname "$0")" && pwd)"; cd "$AG"; PY="${PY:-$AG/.venv/bin/python}"
 export PYTHONPATH="${PYTHONPATH:-$(cd "$AG/../.." && pwd)/examples/client/python}:$AG"
-export XYZDB_IMG="${XYZDB_IMG:-xyzdb:0.9.6-fixA}"
+# Engine image tag: DERIVED from the workspace manifest, never hardcoded. Four
+# scripts here used to carry a literal default and they had drifted to two
+# different stale versions (0.9.6-fixA and 0.9.8-x86v3) while the repo was at
+# 1.1.0 — and this tag is baked into every record's `envelope` field, so the
+# provenance stamp in the data named an engine that did not run. Deriving it
+# cannot go stale.
+xyz_manifest_version() {
+  # Walk up from this script's directory until the workspace manifest appears.
+  # No path arithmetic: the earlier version assumed ../.. and returned an empty
+  # string in three of the four scripts, which would have tagged an image
+  # `xyzdb:` with no version at all.
+  local d; d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  while [ "$d" != "/" ]; do
+    if [ -f "$d/Cargo.toml" ] && grep -q "^\[workspace\]" "$d/Cargo.toml"; then
+      awk '/^\[workspace\.package\]/{f=1;next} /^\[/{f=0} f&&/^version[ 	]*=/{gsub(/[^0-9.]/,"");print;exit}' "$d/Cargo.toml"
+      return 0
+    fi
+    d="$(dirname "$d")"
+  done
+  echo "FATAL: workspace Cargo.toml not found; refusing to tag an image without a version" >&2
+  return 1
+}
+export XYZDB_IMG="${XYZDB_IMG:-xyzdb:$(xyz_manifest_version)}"
 XYZ_ARCH="${XYZ_ARCH:-arm}"   # 'x86-v3' on AWS (AVX2), 'arm' on Mac. Recorded per cell.
 IMG_XYZ="$XYZDB_IMG"
 export BENCH_PG_M=48 BENCH_PG_EFC=200 BENCH_PG_EFS=200 \
@@ -50,7 +72,7 @@ up(){ # $1=engine $2=tier ; sets container bench-<engine> with tier envelope + p
   local mf="--cpus $cpus --memory $dram --memory-swap $memswap"
   case "$e" in
     xyzdb)    docker run -d --name "$c" $mf -p 2505:2505 -v "bench_$e:/data" \
-                "$IMG_XYZ" --port 2505 --path /data/bench --bind 0.0.0.0 --cache-size "$xyzc" >/dev/null 2>&1;;
+                "$IMG_XYZ" --port 2505 --path /data/bench --bind 0.0.0.0 --insecure-allow-no-auth --cache-size "$xyzc" >/dev/null 2>&1;;
     pgvector) docker run -d --name "$c" $mf -p 5432:5432 -e POSTGRES_PASSWORD=bench -v "bench_$e:/var/lib/postgresql" \
                 pgvector/pgvector:pg18 -c shared_buffers=$pgsb -c maintenance_work_mem=$pgmwm >/dev/null 2>&1;;
     qdrant)   docker run -d --name "$c" $mf -p 6333:6333 -v "bench_$e:/qdrant/storage" qdrant/qdrant:latest >/dev/null 2>&1;;
@@ -78,8 +100,21 @@ cell(){ # $1=engine $2=tier $3=scenario(s1|s3) $4=N
   local out="$OUT/${t}_${sc}_n${N}_${e}.jsonl"; : > "$out"
   echo "[$(date +%H:%M:%S)] $t $sc n=$N $e  (dram=$dram swap=$memswap cpus=$cpus cfg=$cfg)"
   if ! up "$e" "$t"; then
-    "$PY" -c "import json;open('$out','a').write(json.dumps({'kind':'$sc','engine':'$e','tier':'$t','envelope':'$envlbl','base_n':$N,'status':'container_did_not_start','oomkilled':$(oomkilled "$e"),'verdict':'OOM','phase':'boot'})+chr(10))"
-    docker rm -f "bench-$e" >/dev/null 2>&1; echo "  -> OOM (base no arranca)"; return; fi
+    # A container that did not start is NOT an OOM unless the kernel says so. This
+    # line used to write verdict=OOM next to oomkilled=0 in the same record — a
+    # fabricated verdict that contradicted its own evidence, and it survived the
+    # cause: eight runners here started xyzDB with `--bind 0.0.0.0` and no token,
+    # which 1.0 refuses with a hard non-zero exit, so every cell reported OOM in
+    # under a second. Keep the two apart: BOOT_FAILED is a harness/config result,
+    # OOM is the kernel's.
+    local killed; killed=$(oomkilled "$e")
+    local vdict; if [ "$killed" = 1 ]; then vdict=OOM; else vdict=BOOT_FAILED; fi
+    local diag=""; [ "$vdict" = BOOT_FAILED ] && diag=$(docker logs "bench-$e" 2>&1 | tail -3 | tr '\n' ' ' | cut -c1-300)
+    "$PY" -c "import json,sys;open('$out','a').write(json.dumps({'kind':'$sc','engine':'$e','tier':'$t','envelope':'$envlbl','base_n':$N,'status':'container_did_not_start','oomkilled':$killed,'verdict':'$vdict','phase':'boot','engine_stderr':sys.argv[1]})+chr(10))" "$diag"
+    docker rm -f "bench-$e" >/dev/null 2>&1
+    if [ "$vdict" = OOM ]; then echo "  -> OOM at boot (kernel killed it)"
+    else echo "  -> BOOT_FAILED (not an OOM; engine exited): $diag"; fi
+    return; fi
   # HARD per-cell wall-timeout. Lesson: tight envelope + swap => SLOW THRASH, not fast
   # OOM. BUILD_TIMEOUT (SIGALRM inside the S1 build) does NOT cover the S3 fleet loop,
   # which hung chroma@T1 for 5h. A cell past WALL = OOM-thrash (a RESULT: "did not

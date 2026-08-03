@@ -26,23 +26,54 @@ COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY .cargo/ .cargo/
 COPY crates/ crates/
 COPY tools/ tools/
-# Confirm the AVX2 baseline flag is present in the build context for the x86
-# image. It is target-scoped to x86_64-unknown-linux-gnu, so it applies to the
-# amd64 build and is inert on arm64. Fail loudly if it is ever silently dropped
-# so an x86-v3 image can never be published as a plain baseline by mistake.
-RUN if [ "$TARGETARCH" = "amd64" ]; then \
+# Arch is detected with `uname -m`, NOT with $TARGETARCH. TARGETARCH is populated
+# only by buildx; with the classic builder — which is what you get from
+# `apt install docker.io` on a current Ubuntu, where buildx is absent — it is
+# EMPTY. The previous version of this guard tested it and therefore took the
+# "arm baseline" branch on an AVX2 x86 host, printing the opposite of the truth
+# and skipping the assertion it exists to make. `uname -m` is always there.
+#
+# v0.6.2 §8 — fat LTO + one codegen unit so the image binary == the tagged release
+# artifact even if [profile.release] is ever relaxed.
+#
+# On x86-64 the engine is built TWICE and both go in the image:
+#   .v3  target-cpu=x86-64-v3 (inherited from .cargo/config.toml) — AVX2/FMA/BMI2
+#   .v2  target-cpu=x86-64    (explicit RUSTFLAGS, which overrides the config)
+# `xyzdb-launch` picks one at startup from the CPU's actual feature set. Shipping
+# only .v3 is what made the amd64 image SIGILL on a pre-AVX2 host; shipping only
+# .v2 would give up ~the whole point of the v3 flip. Both is the only option that
+# needs no decision from whoever runs it.
+#
+# This is safe ONLY because the two builds are not two answers: v2 and v3 produce
+# byte-identical scores, gated in CI by crates/core/tests/score_bit_identity.rs.
+# If that gate ever goes, this dual-build has to go with it.
+RUN set -e; \
+    ARCH="$(uname -m)"; \
+    mkdir -p /build/out; \
+    export CARGO_PROFILE_RELEASE_LTO=fat CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1; \
+    if [ "$ARCH" = "x86_64" ]; then \
       grep -q 'target-cpu=x86-64-v3' .cargo/config.toml \
-        || { echo 'ERROR: target-cpu=x86-64-v3 missing from .cargo/config.toml for amd64 build'; exit 1; }; \
-      echo "xyzdb image: amd64 / x86-v3 — target-cpu=x86-64-v3 (AVX2) applies"; \
+        || { echo 'ERROR: target-cpu=x86-64-v3 missing from .cargo/config.toml for an x86_64 build'; exit 1; }; \
+      echo "xyzdb image: x86_64 — building BOTH v3 (AVX2) and v2 (baseline); the launcher selects at startup"; \
+      cargo build --release -p xyzdb-server; \
+      cp target/release/xyzdb-server /build/out/xyzdb-server.v3; \
+      RUSTFLAGS="-C target-cpu=x86-64" cargo build --release -p xyzdb-server; \
+      cp target/release/xyzdb-server /build/out/xyzdb-server.v2; \
     else \
-      echo "xyzdb image: ${TARGETARCH} — x86-v3 flag inert (arm baseline)"; \
+      echo "xyzdb image: $ARCH — one build; the x86 flag is target-scoped and inert here"; \
+      cargo build --release -p xyzdb-server; \
+      cp target/release/xyzdb-server /build/out/xyzdb-server.v2; \
+    fi; \
+    RUSTFLAGS="$([ "$ARCH" = x86_64 ] && echo '-C target-cpu=x86-64')" \
+      cargo build --release -p xyzdb-launch; \
+    cp target/release/xyzdb-launch /build/out/xyzdb-launch; \
+    echo "--- image payload:"; ls -la /build/out/; \
+    test -x /build/out/xyzdb-launch || { echo 'ERROR: launcher missing'; exit 1; }; \
+    test -x /build/out/xyzdb-server.v2 || { echo 'ERROR: baseline engine missing'; exit 1; }; \
+    if [ "$ARCH" = "x86_64" ]; then \
+      test -x /build/out/xyzdb-server.v3 \
+        || { echo 'ERROR: x86_64 image without the v3 build — the launcher would always take the slow path'; exit 1; }; \
     fi
-# v0.6.2 §8 — build with fat LTO + single codegen unit to match the
-# production release artifact. The root [profile.release] already sets
-# lto = "fat"; the env belt-and-suspenders keeps the image == the tagged
-# artifact even if the profile is ever relaxed.
-RUN CARGO_PROFILE_RELEASE_LTO=fat CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
-    cargo build --release -p xyzdb-server
 
 # Runtime: distroless/cc-debian12 (glibc 2.36 + libgcc + libstdc++, ~34 MB)
 # instead of debian:bookworm-slim (~97 MB). debian12 == bookworm, so the
@@ -60,10 +91,16 @@ FROM gcr.io/distroless/cc-debian12
 ARG TARGETARCH
 ARG XYZ_IMAGE_VARIANT=""
 LABEL org.xyzdb.image-variant="${XYZ_IMAGE_VARIANT:-$TARGETARCH}"
-COPY --from=builder /build/target/release/xyzdb-server /usr/local/bin/
+# On x86_64 this is a DUAL-ISA image: it carries the baseline and the AVX2 engine
+# and selects per host. Do not tag it `x86-v3` — that name says the image only
+# runs where v3 does, which is what this stopped being.
+LABEL org.xyzdb.isa-selection="runtime (xyzdb-launch); x86_64 carries v2+v3, other arches one build"
+COPY --from=builder /build/out/ /usr/local/bin/
 EXPOSE 2505
 VOLUME /data
-ENTRYPOINT ["xyzdb-server"]
+# The launcher execs the engine, so the engine still ends up as PID 1's process
+# image and receives SIGTERM directly (graceful drain, OPERATIONS.md §9).
+ENTRYPOINT ["xyzdb-launch"]
 # The image binds 0.0.0.0 so a running container is reachable. That is a
 # non-loopback bind, so the server refuses to start without authentication:
 # pass `--auth-token <file>` (the secure default). To run open on purpose,

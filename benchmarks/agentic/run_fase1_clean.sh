@@ -16,7 +16,7 @@ up(){ # $1=image $2=cache_mb
   local img=$1 cache=$2 c=bench-xyzdb
   docker rm -f "$c" >/dev/null 2>&1; docker volume rm bench_xyzdb >/dev/null 2>&1
   docker run -d --name "$c" --cpus 2 --memory 8g -p 2505:2505 -v bench_xyzdb:/data "$img" \
-    --port 2505 --path /data/bench --bind 0.0.0.0 --cache-size "$cache" --nearest-budget-ms 0 >/dev/null 2>&1
+    --port 2505 --path /data/bench --bind 0.0.0.0 --insecure-allow-no-auth --cache-size "$cache" --nearest-budget-ms 0 >/dev/null 2>&1
   local i=0; while [ $i -lt 120 ]; do nc -z 127.0.0.1 2505 2>/dev/null && return 0; i=$((i+1)); sleep 1; done
   return 1; }
 
