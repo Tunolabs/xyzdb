@@ -67,8 +67,10 @@ fn zero_bloom_bits(sst: &Path) {
 const N: usize = 60;
 
 #[test]
-#[ignore = "the forge does not reach the read path yet — see the note above; \
-            an ignored measurement is honest, a green one would not be"]
+#[ignore = "needs records that live ONLY in an SSTable: the close must rotate the \
+            journal (a graceful shutdown that seals, flushes and leaves the manifest \
+            durable), not a drop or a kill — otherwise the reopen replays and \
+            repopulates the memtable, which has no bloom to blind"]
 fn a_ghost_routed_read_keeps_its_rows_under_a_blinded_bloom() {
     let dir = tempfile::tempdir().unwrap();
     let spatial_dir = dir.path().join("spatial");

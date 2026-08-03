@@ -61,6 +61,15 @@ filter, and none of them has been measured:
   by the engine itself, so that exposure can appear without anyone writing a query
   differently.
 
+  Vulnerable **by inspection**; reachability could not be measured yet, and the
+  reason is worth stating rather than filing as "unknown": the forge that works for
+  the declaration loads does not reach this path, because the reopen replays the
+  journal and serves the records from the memtable, which has no bloom to blind. A
+  reachability proof needs records living **only** in an SSTable, which means a close
+  that rotates the journal. The attempt is in
+  `tests/ghost_read_bloom_false_negative.rs`, `#[ignore]`d with that condition and
+  with both discriminators already armed.
+
 **What was checked and is NOT exposed.** Listed because a defect file that names only
 the bad parts is easy to misread: "not mentioned" looks exactly like "nobody looked".
 
@@ -77,6 +86,19 @@ above: whether a real post-recovery bloom reaches them is unknown, and the live
 reproduction is flaky. Unknown is not the same as safe, and neither is written here as
 though it were the other. What is no longer available is the comfortable argument that these keys are old
 and already compacted and therefore safe. It did not hold where it was checked.
+
+**The balance, in one place.**
+
+| | Status |
+|---|---|
+| Root cause | **not diagnosed**, no live candidate |
+| Duplicate-anchor check (write path) | **closed** — confirms a miss without the bloom |
+| Gravity / vector / satellite loads | **closed** by range scan — reachability **demonstrated** first |
+| Pinned-field lists | **closed** by range scan — same defect, lighter consequence |
+| `UNIQUE` anchor declarations | **never exposed** — `anchors.bin` lives outside the keyspace |
+| `DECLARE ANCHOR` duplicate check | vulnerable by inspection, **not measured** |
+| Ghost metadata load | vulnerable by inspection, **not measured** |
+| Ghost source-record read | vulnerable by inspection, **not measured** — and the reason is known (above) |
 
 **What it costs you, and the workaround.** The window is an unclean restart. A
 graceful shutdown followed by a clean open does not open it. If a process did come up
