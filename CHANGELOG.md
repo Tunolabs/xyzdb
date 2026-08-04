@@ -6,7 +6,7 @@ All notable changes to xyzDB are documented here. Format based on [Keep a Change
 
 ## [Unreleased]
 
-## [1.1.0] — sub-gravity, and detectors that speak
+## [1.1.0] — 2026-08-03 — sub-gravity, and detectors that speak
 
 Narrative, migration notes and declared costs: [`docs/releases/v1.1.0.md`](docs/releases/v1.1.0.md).
 
