@@ -11,6 +11,11 @@ release is cut, always by fast-forward, always carrying that release's tag. Clon
 repo and you have precisely the tagged, tested code. `main` is protected against
 force-push.
 
+A fast-forward never rewrites or drops history: it moves the `main` pointer ahead to
+the commit `dev` already reached, and every intermediate commit becomes part of
+`main`'s history as-is. Cutting with `--ff-only` makes this a guarantee — if `main`
+ever diverged, the merge aborts instead of creating a merge commit.
+
 ## `dev` — where work happens
 
 Every commit lands on `dev`, and CI runs for real on `dev`. A release is `dev`
@@ -31,6 +36,10 @@ ceremony with no function.
 One per release, annotated and signed. A tag is immutable: never moved, never
 rewritten. `v1.0.0`, then `v1.0.1`, then `v1.1.0`, and so on.
 
+The signing key (GPG or SSH) must be registered in the maintainer's GitHub account
+so tags and release commits show as **Verified** — for a database people trust with
+their data, the badge is part of the release.
+
 ## What each level means for this project
 
 This is the part a user with data on disk needs: the version number tells you what an
@@ -44,21 +53,56 @@ upgrade is allowed to do to you.
 
 ## Release cycle
 
-Four steps, in this order:
+Five steps, in this order:
 
 1. **On `dev`:** bump `version` in the root [`Cargo.toml`](../Cargo.toml) (all crates
    inherit it) and update [`CHANGELOG.md`](../CHANGELOG.md). If the release is a minor
    or major, re-stamp [`LICENSE`](../LICENSE), [`NOTICE`](../NOTICE), and
    [`license-change-dates.md`](license-change-dates.md).
-2. **Parity gate:** `bash .ci/license-version-parity.sh` must be green — it validates
-   that [`LICENSE`](../LICENSE), [`Cargo.toml`](../Cargo.toml), the change-dates table,
-   and [`NOTICE`](../NOTICE) all say the same thing. If it fails, the release does not
-   ship.
-3. **Cut:** fast-forward `dev` onto `main`, then a signed tag on `main`. Push the tag
-   **after** verifying the push of `main`.
+2. **Parity gates — both of them:**
+
+   ```bash
+   bash .ci/license-version-parity.sh    # licence surfaces
+   bash .ci/release-version-parity.sh    # release surfaces
+   ```
+
+   The first validates that [`LICENSE`](../LICENSE), [`Cargo.toml`](../Cargo.toml), the
+   change-dates table and [`NOTICE`](../NOTICE) all say the same thing. The second
+   covers the surfaces that state the release version elsewhere:
+   [`server.json`](../server.json)'s `version` and every `xyzdb-mcp:<tag>` image
+   identifier in it, plus an assertion that `xyzdb-server --version` and the MCP
+   handshake still DERIVE their version from the manifest instead of carrying a
+   literal. It exists because that drift already shipped: at the 1.0.1 cut the manifest
+   said 1.0.0 while the docs said 1.0.1 and the published binary reported 1.0.0, so the
+   docs, `--version` and the registry disagreed about which release you had.
+
+   If either fails, the release does not ship. A tag is superseded, never corrected.
+3. **Cut:** fast-forward `dev` onto `main` locally — the GitHub UI cannot do a pure
+   fast-forward, its merge buttons always create a merge or rewrite commits:
+
+   ```bash
+   git checkout main
+   git merge --ff-only dev
+   git push origin main
+   git tag -s v<version> -m "xyzDB v<version>"
+   git push origin v<version>
+   ```
+
+   Push the tag **after** verifying the push of `main`.
 4. **Document:** a release note under [`releases/`](releases/README.md) named
    `<version>.md`, following the format of the previous ones, plus a new row in
    [`releases/README.md`](releases/README.md).
+5. **Publish:** a GitHub Release on the tag, so watchers are notified and the
+   release appears in the repo sidebar and feeds:
+
+   ```bash
+   gh release create v<version> --verify-tag \
+     --title "xyzDB v<version>" \
+     --notes-file docs/releases/v<version>.md
+   ```
+
+   `--verify-tag` refuses to publish if the tag does not exist on the remote — the
+   release can never point at nothing.
 
 ## The version must match the tag
 
