@@ -6,6 +6,80 @@ All notable changes to xyzDB are documented here. Format based on [Keep a Change
 
 ## [Unreleased]
 
+## [1.1.1] — the doors the last fix missed
+
+Patch: **no behaviour change, no on-disk format change, no wire change.** The one
+new response field is additive JSON. A 1.1.0 data directory opens unchanged and a
+1.1.0 client keeps working.
+
+### Fixed
+
+- **Two more anchor checks distrust a post-recovery bloom.** 1.1.0 armoured the
+  duplicate-anchor check on the single-`PUT` path: after an unclean restart, a
+  bloom-gated "absent" is re-confirmed without the bloom before it is believed. The
+  identical decision was left bloom-gated in **`PUT BATCH`** and in **`AUTOANCHOR
+  APPLY`** — one defect class, three doors, one closed. A false negative in the
+  batch path writes a second record under a `UNIQUE` anchor; in the populate path
+  it re-indexes a value that already has an entry, silently repointing the anchor
+  at a different record while reporting the write as "indexed". Both now share the
+  single-`PUT` confirmation, its counter and its warning, through one function
+  (`ops::put::anchor_dict_get`) that every caller must go through — the previous
+  shape was three copies of a decision, which is how two of them stayed wrong.
+  Each door has a forged-bloom test **and a negative control that asserts the
+  defect with the armouring off**, because a guard that cannot be shown to be
+  load-bearing is decoration.
+- **The ghost writes counter too.** `load_total_writes` was the last bloom-gated
+  point read of the set. Its cost is the mildest — a false "absent" resets a
+  promotion counter, so a ghost that had earned auto-creation earns it again — and
+  it is closed anyway, because leaving one door of a class open is how the class
+  survives.
+- **`KNOWN-ISSUES.md` named the wrong statement.** It reported a duplicate check in
+  `DECLARE ANCHOR`; there is none — `ANCHOR … UNIQUE IN` registers the anchor and
+  never touches the dictionary. The bloom-gated read was in `AUTOANCHOR APPLY`, an
+  operational populate step, which is a different exposure profile: an operator runs
+  it deliberately, rather than every application issuing it. The correction is
+  recorded in that file rather than quietly applied.
+- **The spec called `LOBE` idempotent. It is not** — re-declaring an existing lobe
+  is refused with `INVALID_QUERY`, and so is re-declaring an anchor. Making
+  re-declaration a no-op is the better contract and is a behaviour change, so the
+  sentence is corrected here and the change waits for a minor.
+- **`docs/mcp-integration.md` commanded an image tag that was never published.**
+  Four `docker run` lines named `xyzdb-mcp:1.1.0`; GHCR carries `1.0.1` only. They
+  now name the tag that exists.
+
+### Added
+
+- **The engine version is queryable over the protocol.** `STATS`, HTTP `/stats` and
+  the `/health` probe carry a `version` key. Additive and diagnostic: `alive` keeps
+  its place in the health payload, so a checker reading only that field is
+  unaffected. Until now the only way to learn which engine you were talking to was
+  to run `--version` against the binary inside the container — which an operator
+  holding a connection cannot do, and which is step one of the format-mismatch
+  procedure in `OPERATIONS.md` §8.4.
+- **A known issue for the WAL gap in derived state.** Ghost entries, rollup deltas
+  and the `AUTOANCHOR APPLY` dictionary insert are written straight to a memtable,
+  outside the WAL, so a crash after an acknowledged write can lose them while the
+  record survives. No acknowledged record is lost and no `UNIQUE` constraint
+  weakens — the asymmetry is in derived state. `REFRESH GHOST` is the repair. Filed
+  rather than fixed because the fix moves a read-modify-write inside the fsync
+  barrier, which is a write-path latency change a patch must not make unmeasured.
+- **Per-file `SPDX-License-Identifier: BUSL-1.1`** across the tree.
+
+### Changed
+
+- **Docs the integration exercise found wrong or missing**: a retry-safety table
+  and the idempotent-write pattern (anchored `PUT` + `ON CONFLICT UPDATE`), the
+  fact that identifiers are interpolated and only *values* can be bound, that an
+  upsert **merges** rather than replaces, and that a link written by the standalone
+  `LINK` statement is **not visible to `PULL`** — with `GRAVITY BY` on the child
+  lobe as the supported idiom. The `ROADMAP` entry calling the satellite axis
+  "design in validation" now describes what actually remains (re-packing existing
+  records); the axis shipped in 1.1.0.
+- **Removed the dead `EngineConfig.worker_threads`.** Nothing read it, and fourteen
+  test files set it — which is the argument for deleting it rather than filing it:
+  a knob that looks load-bearing and is not had already fooled the people writing
+  the tests.
+
 ## [1.1.0] — 2026-08-03 — sub-gravity, and detectors that speak
 
 Narrative, migration notes and declared costs: [`docs/releases/v1.1.0.md`](docs/releases/v1.1.0.md).

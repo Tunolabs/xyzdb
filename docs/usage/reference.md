@@ -221,6 +221,42 @@ Scale `0.1` ≈ 14.7M records (primary), `1.0` ≈ 149M. See `scripts/run_aws_4e
 
 ## 5. Operational gotchas
 
+### 5.0 Retrying a write safely
+
+A client that stops waiting has not cancelled anything. The frame may have reached
+the engine and committed before the response was lost, so **a timed-out write is
+indeterminate**, and whether you may reissue it is a per-statement question:
+
+| Statement | Safe to reissue? |
+|---|---|
+| `PUT` with an anchored field + `ON CONFLICT UPDATE` | **Yes.** The anchor makes the record's identity yours, so the second attempt merges onto the first instead of inserting beside it. |
+| `PUT` with an anchored field, no clause | Yes in the sense that it cannot duplicate — the retry fails with `DUPLICATE_ANCHOR`, which tells you the first one landed. |
+| Plain `PUT`, no anchor | **No.** The engine has nothing to recognise the record by, so a retry inserts a second one. |
+| `SET` / `DELETE` with a `WHERE` | Yes — idempotent by construction. |
+| `PUT BATCH` | Per chunk. A batch is atomic within itself; across chunks it is not, so a retry needs the anchored form above. |
+
+**So the idempotent write is an anchored `PUT` with `ON CONFLICT UPDATE`**, and it
+is worth designing for before you need it:
+
+```
+ANCHOR "order_id" UNIQUE IN "orders"
+PUT {order_id: "A-1001", status: "paid", total: 4200} IN "orders" ON CONFLICT UPDATE
+```
+
+Run that twice and you have one record. Note the upsert **merges**: fields the
+record already has and the statement omits are kept, so a retry that carries a
+subset does not clear the rest.
+
+None of the shipped clients retries for you, deliberately — a retry without this
+pattern turns an ambiguous write into a duplicate one.
+
+**Identifiers are not bindable.** Bound `$name` parameters (protocol V4) cover
+*values* only, and they are substituted server-side, so a hostile value matches
+nothing. **Lobe names, field names and `ORDER BY` targets are interpolated into the
+statement as text** — there is no placeholder form for them. Anything in that
+position that can come from a request must be checked against a fixed set you
+control, never passed through.
+
 ### 5.1 Data directory format versions
 
 On-disk format is bumped on breaking changes. Current data is `MANIFEST_VERSION = 5` (turba-engine) and `GHOST_META_FORMAT = 0x09` (xyzdb-engine, the ghost-persistence format). v0.8.8 added the vectors keyspace and the V5 record format; a later format bump widened the on-disk key to 24 bytes with a `sat` axis, taking `MANIFEST_VERSION` to 5. That axis was reserved while there were no users and **went live in 1.1 with `SATELLITE BY` — no format change was needed**, which is why 1.0 and 1.1 share `MANIFEST_VERSION = 5` and a 1.0.x data directory opens unchanged. Opening data written by an older format fails with `Error::IncompatibleFormat` and a clear message pointing at re-ingest.

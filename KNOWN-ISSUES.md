@@ -55,21 +55,22 @@ loaders brought the lobe up reporting `Vector: (none)`. The axis was gone, and
 nothing said so. `tests/spec_load_bloom_false_negative.rs` asserts both halves: that
 the forge really does blind lookups, and that the axes survive it.
 
-**Where it is still NOT closed.** These bloom-gated point lookups still trust the
-filter, and none of them has been measured:
+**A correction to this file, made in 1.1.1.** Until 1.1.1 the list below named a
+duplicate check in `DECLARE ANCHOR`. There is no such check: `ANCHOR … UNIQUE IN`
+registers the anchor and persists the registry, and never touches the dictionary
+(`engine/verbs.rs`, `execute_anchor`). The bloom-gated read that was meant is in
+**`AUTOANCHOR APPLY`**, the operational statement that back-fills the dictionary
+for records written before the anchor existed. The defect was real and is now
+closed; what was wrong was the label, and the label mattered — it pointed readers
+at a declarative statement any application issues, when the exposure is a populate
+step an operator runs by hand. Recorded rather than quietly corrected, because the
+mis-attribution is the kind of thing this file exists to not do.
 
-- **The pinned-field lists** and their legacy key, loaded at boot. Same shape the
-  specs had. Losing them loses which columns a read projects — not a constraint.
-- The duplicate check in `DECLARE ANCHOR`, and a ghost metadata load.
-- **The anchor collision check on the `PUT BATCH` path.** It reads the dictionary with
-  a plain bloom-gated `get`, without the bloom-less confirmation the single-`PUT` path
-  does. A false negative there would make a batch treat a colliding record as new:
-  without `ON CONFLICT UPDATE` a `DuplicateAnchor` that should fire does not, and with
-  it the record is inserted instead of merged — a duplicate under `UNIQUE` either way.
-  Same consequence as the batch-upsert defect fixed in 1.1.0, reached through a
-  different door. Vulnerable **by inspection**; not measured.
+**Where it is still NOT closed.** One bloom-gated point lookup still trusts the
+filter:
+
 - **The ghost's point-read of a source record** (`ghost/read.rs`). The sharpest of
-  the three: its miss branch skips the record, so a false negative there **silently
+  the set: its miss branch skips the record, so a false negative there **silently
   drops rows from a result** rather than raising anything. And ghosts are materialised
   by the engine itself, so that exposure can appear without anyone writing a query
   differently.
@@ -89,17 +90,23 @@ the bad parts is easy to misread: "not mentioned" looks exactly like "nobody loo
 - **`UNIQUE` anchor declarations.** They do not live in the keyspace at all —
   `AnchorRegistry` is loaded from its own file under `meta/` (`engine/boot.rs`), so no
   bloom, no point lookup, no range scan. A false negative cannot reach them.
-- **The `UNIQUE` constraint on the single-`PUT` write path.** The duplicate check
-  confirms a miss without the bloom before trusting it (`ops/put.rs`), and that was
-  verified under a total forge: a `PUT` reusing an existing key still collides. The
-  `PUT BATCH` path does **not** share that confirmation — see the list above.
+- **The `UNIQUE` constraint on every write path.** All three anchor lookups — single
+  `PUT`, `PUT BATCH`, `AUTOANCHOR APPLY` — confirm a miss without the bloom before
+  trusting it, and each is pinned by a forged-bloom test with its own negative
+  control (`tests/anchor_bloom_false_negative.rs`). They share one function
+  (`ops::put::anchor_dict_get`) on purpose: 1.1.0 armoured the single-`PUT` door and
+  left the other two open, one class through three doors, so the confirmation is now
+  somewhere a fourth caller cannot avoid.
+- **Ghost metadata.** Loaded by range scan (`ghost/persist.rs`), never a point get.
+  Only its writes counter was bloom-gated, and 1.1.1 closed that too.
 
-**Reachability, precisely.** Demonstrated for the three declaration loads — that is
-what the forged test showed before the fix. **Not measured** for the paths listed
-above: whether a real post-recovery bloom reaches them is unknown, and the live
-reproduction is flaky. Unknown is not the same as safe, and neither is written here as
-though it were the other. What is no longer available is the comfortable argument that these keys are old
-and already compacted and therefore safe. It did not hold where it was checked.
+**Reachability, precisely.** Demonstrated for the three declaration loads and for all
+three anchor paths — that is what the forged tests show. **Not measured** for the one
+path still open: whether a real post-recovery bloom reaches the ghost source-record
+read is unknown, and the live reproduction is flaky. Unknown is not the same as safe,
+and neither is written here as though it were the other. What is no longer available
+is the comfortable argument that these keys are old and already compacted and
+therefore safe. It did not hold where it was checked.
 
 **The balance, in one place.**
 
@@ -107,12 +114,12 @@ and already compacted and therefore safe. It did not hold where it was checked.
 |---|---|
 | Root cause | **not diagnosed**, no live candidate |
 | Duplicate-anchor check, single `PUT` | **closed** — confirms a miss without the bloom |
-| Anchor collision check, `PUT BATCH` | vulnerable by inspection, **not measured** — plain bloom-gated `get`, no confirmation |
+| Anchor collision check, `PUT BATCH` | **closed in 1.1.1** — same confirmation, same counter, forged test + negative control |
+| `AUTOANCHOR APPLY` duplicate check | **closed in 1.1.1** — same; this is the path this file used to call `DECLARE ANCHOR` |
 | Gravity / vector / satellite loads | **closed** by range scan — reachability **demonstrated** first |
 | Pinned-field lists | **closed** by range scan — same defect, lighter consequence |
 | `UNIQUE` anchor declarations | **never exposed** — `anchors.bin` lives outside the keyspace |
-| `DECLARE ANCHOR` duplicate check | vulnerable by inspection, **not measured** |
-| Ghost metadata load | vulnerable by inspection, **not measured** |
+| Ghost metadata load | **never exposed** — range scan; its writes counter **closed in 1.1.1** |
 | Ghost source-record read | vulnerable by inspection, **not measured** — and the reason is known (above) |
 
 **What it costs you, and the workaround.** The window is an unclean restart. A
@@ -120,6 +127,40 @@ graceful shutdown followed by a clean open does not open it. If a process did co
 from a dirty restart, `xyzdb_recovered_from_wal` in `STATS` and `/metrics` reports it
 — treat that as a degraded mode, and prefer a clean restart before trusting a lobe's
 declarations.
+
+---
+
+### Ghost deltas and the `AUTOANCHOR APPLY` back-fill are written outside the WAL
+
+**What.** Every multi-keyspace mutation goes through one `WriteBatch` and one WAL
+entry, so a `PUT`'s record, its identity mapping, its vector column and its anchor
+entries are atomic across a crash: all or none. Three writes do **not** travel that
+way. The ghost-entry hook and the rollup deltas it maintains (`ghost/notify.rs`) and
+the dictionary insert in `AUTOANCHOR APPLY` (`engine/verbs.rs`) go straight into a
+memtable through `Tree::insert`, which assigns a sequence number and touches no
+journal.
+
+**What it costs you.** A crash between an acknowledged write and the next flush of
+`ghosts` / `dictionary` loses the derived state while the record survives. After
+recovery a ghost under-counts or misses the row, and an `AUTOANCHOR APPLY` that
+reported *N indexed* may have persisted fewer. Nothing repairs it automatically and
+nothing reports it: the ghost answers, it just answers from a state that is short.
+
+**What it does NOT cost you.** No acknowledged record is lost, and no `UNIQUE`
+constraint is weakened — those live in the WAL-backed batch. This is a durability
+asymmetry in derived state, not in your data.
+
+**Workaround.** `REFRESH GHOST "<name>"` rebuilds a ghost from the lobe, which is
+the same remedy the 1.1.0 upsert-drift fix prescribes; re-running `AUTOANCHOR APPLY`
+is idempotent by the duplicate check above. If a process reports
+`xyzdb_recovered_from_wal = 1`, treat declared ghosts over write-heavy lobes as
+suspect until refreshed.
+
+**Why it is filed rather than fixed.** Carrying these as batch items in the commit
+WAL entry is the fix — they are ordinary keyspace puts and the journal already frames
+arbitrary keyspaces — but it moves the rollup read-modify-write inside the fsync
+barrier, which is a write-path latency change that a patch release must not make
+unmeasured. Tracked for the next minor.
 
 ---
 

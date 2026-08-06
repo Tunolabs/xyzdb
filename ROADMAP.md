@@ -58,8 +58,9 @@ redo of what failed — and a billions-of-records scale tier. Multi-tenancy
 isolation stays cgroup-level (one xyzDB process per tenant), not intra-process
 namespaces.
 
-- **Satellite axis (sub-gravity).** A second, low-cardinality axis, declared per
-  lobe, that turns a frequent filter into a key range so a read touches only the
-  matching rows. The physical slot is already reserved in the key as of 1.0 (the
-  `sat` axis — see *What makes xyzDB different* in the [README](README.md)), so
-  enabling it breaks no format and needs no migration. Design in validation.
+- **Satellite re-packing.** The satellite axis itself **shipped in 1.1.0**
+  (`SATELLITE BY`); what is not built is moving records that already exist. A lobe
+  must be empty when the axis is declared, because existing rows would stay in the
+  default sub-bucket where a bounded query never reaches them. Re-packing them is a
+  data-movement feature, not a key-format change — the slot has been in the key
+  since 1.0.

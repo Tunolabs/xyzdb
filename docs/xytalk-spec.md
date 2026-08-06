@@ -152,7 +152,7 @@ LOBE "creditos" HINT="Credit lifecycle: Credit + Installment + Payment + Collect
 ```
 
 **Behavior:**
-- Registers the lobe in the lobe registry. Idempotent: declaring the same lobe twice is a no-op.
+- Registers the lobe in the lobe registry. **Not idempotent: re-declaring an existing lobe is refused** with `INVALID_QUERY` ("Lobe 'x' already exists"), and the same is true of `ANCHOR … UNIQUE IN`. This document called `LOBE` idempotent through 1.1.0; it never was, and an application boot that declares its schema unconditionally has to tolerate the error or check first. Making re-declaration a no-op is the better contract — migrations run twice — and it is a behaviour change, so it waits for a minor rather than being smuggled into a patch that corrected the sentence.
 - A lobe is **also auto-created** on the first `PUT` that targets it, so explicit declaration is optional *if you only ever write to it*.
 - **Every declaration statement requires the lobe to already exist**: `ANCHOR` (§2.2), `GRAVITY BY` (§2.2.1), `SATELLITE BY` (§2.2.2) and `VECTOR` (§2.20) all fail with `Lobe '<name>' not found` against a lobe that has never been created. Since two of those must be declared *before* the first write, the practical order for anything beyond a plain write is `LOBE` first:
 
@@ -287,7 +287,10 @@ PUT {*company: "Acme", _type: "Invoice", amount: 15000.50, status: "pending"} IN
 PUT {*project: "Alpha", title: "Design phase", hours: 40} IN "tasks"
     LINK TO "projects" WHERE name="Alpha" AS "task_of"
 
--- Upsert: update if anchor conflicts
+-- Upsert: update if anchor conflicts. The named fields are MERGED onto the
+-- existing record — fields it already has and this statement omits are KEPT,
+-- not cleared. So an upsert is a partial update, and there is no form of PUT
+-- that replaces a record wholesale.
 PUT {email: "ceo@acme.com", name: "New Name", role: "CEO"} IN "clients" ON CONFLICT UPDATE
 
 -- With null value (V4)
@@ -593,6 +596,28 @@ LINK "clientes" WHERE rfc = "ACME-001" TO "creditos" WHERE _type = "Credit" AS "
 - `WHERE` on either side is optional; omitting it links **all** records in that lobe (use with care)
 - Each side's `WHERE` accepts the full `OR`/`NOT`/`IN` tree (§3): an AND-pure side takes the anchor/gravity fast path, `OR`/`NOT` scans + filters
 - Standalone-form `WHERE` filters were added in v0.2.5.1 (previously only the `PUT … LINK TO` sub-clause was usable for filtered links)
+
+> **A link written by the standalone `LINK` statement is not visible to `PULL`.**
+> `PULL` walks the gravity bucket of the root record (§2.6): it reads a key range,
+> not a link index. `PUT … LINK TO` **within one lobe** works because the child is
+> co-located into the parent's bucket at write time. The standalone statement
+> writes the `_link_<rel>` field and rewrites the record at its existing spatial
+> key — no re-bucketing — and a cross-lobe child sits under a different `lobe_id`
+> prefix entirely, so neither is in the range `PULL` visits. The engine confirms
+> the write; the traversal never reaches it.
+>
+> **For parent/child reads, declare gravity on the child lobe instead:**
+>
+> ```
+> GRAVITY BY customer_id IN "orders"
+> SCAN "orders" WHERE customer_id = "ACME-001"
+> ```
+>
+> That is the supported idiom and the faster one — "the children of this record"
+> becomes a single bucket read. Use the standalone `LINK` for a relation you intend
+> to read back as a *field*, not through `PULL`. Making the statement re-bucket, or
+> making it refuse, is an open decision for the next minor; what will not survive is
+> today's silent-ok.
 
 #### 2.10 INCACHE / OUTCACHE — RecordCache control
 

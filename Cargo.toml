@@ -12,7 +12,7 @@ exclude = ["tools/validation", "benchmarks"]
 [workspace.package]
 edition = "2024"
 rust-version = "1.85"
-version = "1.1.0"
+version = "1.1.1"
 authors = ["Iván Moreno Mendoza <ivan@tuno.bar>"]
 license = "BUSL-1.1"
 repository = "https://github.com/Tunolabs/xyzdb"
