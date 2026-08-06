@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use super::*;
 use crate::stats::{
     BlockCacheStats, CgroupStats, CompactStats, GhostAutoStats, GhostLobeEntry, GhostStats,
@@ -270,6 +271,7 @@ impl Engine {
         };
 
         StatsSnapshot {
+            version: crate::stats::ENGINE_VERSION,
             keyspaces,
             block_cache,
             ghosts,

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use crate::json_response;
 use crate::protocol::{self, FORMAT_BINARY, STATUS_ERROR, STATUS_OK};
 use crate::response;
@@ -340,7 +341,19 @@ async fn handle_unauth_probe<S>(
                 ),
             }
         }
-        "/HEALTH" | "HEALTH" => (STATUS_OK, br#"{"alive": true}"#.to_vec()),
+        // `version` is additive and diagnostic: the probe stays a liveness probe
+        // and `alive` keeps its position, so a checker that reads only that field
+        // is unaffected. It is here because /health is the one endpoint reachable
+        // without a token, which makes it the only way to identify an engine you
+        // cannot authenticate against.
+        "/HEALTH" | "HEALTH" => (
+            STATUS_OK,
+            format!(
+                r#"{{"alive": true, "version": "{}"}}"#,
+                xyzdb_engine::stats::ENGINE_VERSION
+            )
+            .into_bytes(),
+        ),
         "/READY" | "READY" => readiness_response(engine),
         "/METRICS" | "METRICS" => {
             // v0.4 cp 2.2.4: Prometheus exposition format.

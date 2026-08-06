@@ -6,12 +6,27 @@
 //! top-level keys staying put, but fields MAY be added over time. Breaking
 //! rename/removal goes behind a schema-version bump.
 
+// SPDX-License-Identifier: BUSL-1.1
 use serde::Serialize;
 use std::collections::BTreeMap;
+
+/// The engine version this process is running.
+///
+/// Read from the workspace version at compile time, so it cannot drift from the
+/// binary that answers.
+pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Top-level /stats response body.
 #[derive(Debug, Serialize)]
 pub struct StatsSnapshot {
+    /// Engine version, e.g. `"1.1.1"`.
+    ///
+    /// Additive since 1.1.1, and diagnostic only. Before it, the only way to
+    /// learn which engine you were talking to was to run `--version` against the
+    /// binary inside the container — which an operator holding a connection
+    /// cannot do, and which is the first step `OPERATIONS.md` §8.4 asks for in a
+    /// format-mismatch incident.
+    pub version: &'static str,
     pub keyspaces: BTreeMap<String, KeyspaceStats>,
     pub block_cache: BlockCacheStats,
     pub ghosts: GhostStats,
