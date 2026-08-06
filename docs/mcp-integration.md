@@ -71,7 +71,7 @@ listed on the official MCP registry under the name
 `io.github.Tunolabs/xyzdb`.
 
 ```
-ghcr.io/tunolabs/xyzdb-mcp:1.0.1
+ghcr.io/tunolabs/xyzdb-mcp:1.1.1
 ```
 
 The image is Business Source License 1.1, same as the engine — see
@@ -95,7 +95,7 @@ Bind-mount your data directory to `/data` and open it in embedded mode:
 
 ```bash
 docker run -i --rm -v /absolute/path/to/your/data/dir:/data \
-  ghcr.io/tunolabs/xyzdb-mcp:1.0.1 --embed /data
+  ghcr.io/tunolabs/xyzdb-mcp:1.1.1 --embed /data
 ```
 
 MCP client config:
@@ -108,7 +108,7 @@ MCP client config:
       "args": [
         "run", "-i", "--rm",
         "-v", "/absolute/path/to/your/data/dir:/data",
-        "ghcr.io/tunolabs/xyzdb-mcp:1.0.1",
+        "ghcr.io/tunolabs/xyzdb-mcp:1.1.1",
         "--embed", "/data"
       ]
     }
@@ -124,7 +124,7 @@ it as the auth preamble; a non-loopback bind always enforces auth):
 
 ```bash
 docker run -i --rm -e XYZDB_TOKEN="$XYZDB_TOKEN" \
-  ghcr.io/tunolabs/xyzdb-mcp:1.0.1 --connect host.docker.internal:2505
+  ghcr.io/tunolabs/xyzdb-mcp:1.1.1 --connect host.docker.internal:2505
 ```
 
 MCP client config (the empty-valued `-e XYZDB_TOKEN` passes the variable
@@ -138,7 +138,7 @@ through from the client's environment):
       "args": [
         "run", "-i", "--rm",
         "-e", "XYZDB_TOKEN",
-        "ghcr.io/tunolabs/xyzdb-mcp:1.0.1",
+        "ghcr.io/tunolabs/xyzdb-mcp:1.1.1",
         "--connect", "host.docker.internal:2505"
       ]
     }
