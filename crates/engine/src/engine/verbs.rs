@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use super::*;
 
 /// One line `SHOW PROFILE` can emit.
@@ -631,7 +632,14 @@ impl Engine {
                 };
                 let dk = crate::anchor::dictionary_key(lobe_id, &stmt.field, &val_str);
 
-                if self.turba.dictionary.get(&dk).ok().flatten().is_some() {
+                // Third door of the same defect class as the two `PUT` paths: this
+                // populate step decides "no anchor entry yet" from a bloom-gated
+                // read, and a post-recovery bloom that lies here indexes a second
+                // LID under a value that already has one. Shares the confirmation
+                // and the counter — see `ops::put::anchor_dict_get`.
+                if crate::ops::put::anchor_dict_get(self, &dk, &stmt.field, &val_str, &lobe_name)?
+                    .is_some()
+                {
                     duplicates.push(val_str);
                 } else {
                     self.turba

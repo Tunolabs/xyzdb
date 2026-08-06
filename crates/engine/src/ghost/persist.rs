@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use super::*;
 
 impl GhostLobeManager {
@@ -277,21 +278,34 @@ impl GhostLobeManager {
     }
 
     /// Load total_writes for a lobe from dictionary.
-    pub fn load_total_writes(dictionary: &Tree, lobe_id: u16) -> u64 {
+    ///
+    /// The last of the bloom-gated point reads the recovery-bloom defect can reach
+    /// (`KNOWN-ISSUES.md`). Its cost is the mildest of the set — a false "absent"
+    /// resets a promotion counter to zero, so a ghost that had earned auto-creation
+    /// has to earn it again; no data is lost and no constraint breaks. It is closed
+    /// anyway, because "cheap to close" beat "cheap to lose" and leaving one door of
+    /// a class open is how the class survives.
+    ///
+    /// `recovered_from_wal` gates the confirmation for the same reason as the anchor
+    /// checks: outside that window the bloom is trusted and this costs nothing. No
+    /// counter here — unlike a duplicated anchor, a re-earned promotion counter is
+    /// not evidence anyone needs to act on.
+    pub fn load_total_writes(dictionary: &Tree, lobe_id: u16, recovered_from_wal: bool) -> u64 {
         let mut key = Vec::with_capacity(4);
         key.extend_from_slice(&WRITES_PREFIX);
         key.extend_from_slice(&lobe_id.to_be_bytes());
-        dictionary
-            .get(&key)
-            .ok()
-            .flatten()
-            .and_then(|v: Vec<u8>| {
-                if v.len() == 8 {
-                    Some(u64::from_be_bytes(v[..8].try_into().unwrap()))
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(0)
+        let raw = match dictionary.get(&key).ok().flatten() {
+            Some(v) => Some(v),
+            None if recovered_from_wal => dictionary.get_no_bloom(&key).ok().flatten(),
+            None => None,
+        };
+        raw.and_then(|v: Vec<u8>| {
+            if v.len() == 8 {
+                Some(u64::from_be_bytes(v[..8].try_into().unwrap()))
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0)
     }
 }

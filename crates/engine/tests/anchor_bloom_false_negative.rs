@@ -24,6 +24,7 @@
 //! the first test could pass for reasons unrelated to the armouring, and a guard
 //! that cannot be shown to be load-bearing is decoration.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -208,4 +209,134 @@ fn unarmed_the_blinded_bloom_lets_a_duplicate_anchor_through() {
         "unarmed, nothing was caught, so the counter must not move — otherwise a \
          non-zero count would not mean what the stats field claims it means"
     );
+}
+
+// ── The other two doors of the same class ────────────────────────────────────
+//
+// 1.1.0 armoured the single-`PUT` check above and left the identical decision
+// bloom-gated in two more places: the `PUT BATCH` loop and the `AUTOANCHOR APPLY`
+// populate step. One defect class, three doors, one closed. 1.1.1 routes all three
+// through `ops::put::anchor_dict_get`, and each door gets the same armed/unarmed
+// pair below — a shared implementation still needs per-door proof, because what
+// differs is not the lookup but what the caller *does* with a false "absent".
+
+/// Armed: a batch carrying a colliding anchor must be refused, not inserted.
+#[test]
+fn armed_after_recovery_the_batch_duplicate_anchor_is_still_caught() {
+    let _serial = serial();
+    let dir = tempfile::tempdir().unwrap();
+    let engine = engine_with_blinded_anchor_bloom(dir.path());
+
+    let caught_before = anchor_bloom_false_negatives();
+    FORCE_RECOVERED_FROM_WAL.store(true, Relaxed);
+    let err = run(
+        &engine,
+        r#"PUT BATCH IN "ledger" [{txid: "TX-1", amount: 999}]"#,
+    )
+    .expect_err("the batch duplicate must be refused even with a blinded bloom");
+    assert!(
+        err.contains("DuplicateAnchor") || err.to_lowercase().contains("duplicate"),
+        "expected a duplicate-anchor rejection, got: {err}"
+    );
+
+    let tx1 = count_tx1(&engine);
+    assert_eq!(tx1, 1, "exactly one TX-1 must exist, found {tx1}");
+    assert_eq!(
+        anchor_bloom_false_negatives(),
+        caught_before + 1,
+        "the prevented batch duplicate must be counted like the single-PUT one"
+    );
+}
+
+/// NEGATIVE CONTROL for the batch door: unarmed, the same forged state duplicates.
+#[test]
+fn unarmed_the_blinded_bloom_lets_a_batch_duplicate_through() {
+    let _serial = serial();
+    let dir = tempfile::tempdir().unwrap();
+    let engine = engine_with_blinded_anchor_bloom(dir.path());
+
+    let caught_before = anchor_bloom_false_negatives();
+    FORCE_RECOVERED_FROM_WAL.store(false, Relaxed);
+    run(
+        &engine,
+        r#"PUT BATCH IN "ledger" [{txid: "TX-1", amount: 999}]"#,
+    )
+    .expect("unarmed, the blinded bloom makes the batch duplicate look absent");
+
+    let tx1 = count_tx1(&engine);
+    assert_eq!(
+        tx1, 2,
+        "negative control: unarmed, the batch must have DUPLICATED the unique \
+         anchor (found {tx1}). If this is 1, the armed test above proves nothing."
+    );
+    assert_eq!(
+        anchor_bloom_false_negatives(),
+        caught_before,
+        "unarmed, nothing was caught, so the counter must not move"
+    );
+}
+
+/// Armed: `AUTOANCHOR APPLY` must still SEE the entry that already exists, and
+/// report it as a duplicate rather than re-indexing the value onto another record.
+///
+/// The harm here is quieter than a duplicate row: the second record's LID
+/// overwrites the first at the same dictionary key, so the anchor silently starts
+/// resolving to a different record. Nothing in the response says so — it counts
+/// the write as "indexed".
+#[test]
+fn armed_after_recovery_autoanchor_apply_still_sees_the_existing_entry() {
+    let _serial = serial();
+    let dir = tempfile::tempdir().unwrap();
+    let engine = engine_with_blinded_anchor_bloom(dir.path());
+
+    // No second write on purpose. The first draft added one to create the
+    // collision, and it made both of these tests meaningless: a fresh PUT lands
+    // its dictionary entry in the ACTIVE MEMTABLE, which has no bloom, so the
+    // lookup found it there and the filter was never consulted. The negative
+    // control caught it. The state that matters is the one already on disk —
+    // TX-1's entry living only in the blinded SSTable, with its record still in
+    // `spatial` — which is exactly what the helper leaves behind.
+    FORCE_RECOVERED_FROM_WAL.store(true, Relaxed);
+    let msg = ok_message(&engine, r#"AUTOANCHOR APPLY "txid" IN "ledger""#);
+    assert!(
+        msg.contains("duplicates found"),
+        "armed, the populate step must report the colliding value rather than \
+         re-indexing it: {msg}"
+    );
+}
+
+/// NEGATIVE CONTROL for the populate door: unarmed, the collision is invisible and
+/// the step reports a clean run over the very records that collide.
+#[test]
+fn unarmed_autoanchor_apply_reindexes_over_the_existing_entry() {
+    let _serial = serial();
+    let dir = tempfile::tempdir().unwrap();
+    let engine = engine_with_blinded_anchor_bloom(dir.path());
+
+    FORCE_RECOVERED_FROM_WAL.store(false, Relaxed);
+
+    let msg = ok_message(&engine, r#"AUTOANCHOR APPLY "txid" IN "ledger""#);
+    assert!(
+        !msg.contains("duplicates found"),
+        "negative control: unarmed, the blinded bloom must hide the collision \
+         entirely, so the step reports a clean run: {msg}"
+    );
+}
+
+fn count_tx1(engine: &Engine) -> usize {
+    let recs = match run(engine, r#"SCAN "ledger""#).unwrap() {
+        QueryResult::Records(r) => r,
+        QueryResult::PaginatedRecords { records, .. } => records,
+        other => panic!("unexpected: {other:?}"),
+    };
+    recs.iter()
+        .filter(|r| r.fields.get("txid").and_then(|v| v.as_text()) == Some("TX-1"))
+        .count()
+}
+
+fn ok_message(engine: &Engine, q: &str) -> String {
+    match run(engine, q).unwrap_or_else(|e| panic!("{q}: {e}")) {
+        QueryResult::Ok { message, .. } => message,
+        other => panic!("expected Ok, got {other:?}"),
+    }
 }

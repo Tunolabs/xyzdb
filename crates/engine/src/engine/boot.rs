@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use super::*;
 use crate::keyspaces;
 use crate::throttle::ThrottleConfig;
@@ -191,7 +192,11 @@ impl Engine {
 
         // Restore persisted total_writes per lobe
         for (_, config) in lobe_registry.all() {
-            let writes = GhostLobeManager::load_total_writes(&turba.dictionary, config.id);
+            let writes = GhostLobeManager::load_total_writes(
+                &turba.dictionary,
+                config.id,
+                turba.recovered_from_wal(),
+            );
             if writes > 0 {
                 let router = routers.entry(config.id).or_default();
                 router.set_total_writes(writes);
