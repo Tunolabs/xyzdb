@@ -296,6 +296,15 @@ No explicit `shutdown()` API on `Engine`. Drop is the single lifecycle contract.
 | op | file | one-line |
 |---|---|---|
 | PUT | `ops/put.rs` | gravity hash, anchor check, single write or batch |
+
+**One decision point for "this anchor is free".** Every caller that concludes an
+anchor value is unused — single `PUT`, `PUT BATCH`, and the `AUTOANCHOR APPLY`
+back-fill — goes through `ops::put::anchor_dict_get`, which is also where the
+post-recovery bloom-less confirmation lives. This is a structural invariant, not a
+tidiness preference: the three used to hold three copies of the same decision, and
+when 1.1.0 armoured one of them against a lying bloom the other two silently kept
+trusting it. A fourth caller cannot reach that conclusion without passing through
+the confirmation.
 | FIND | `ops/find.rs` | anchor → gravity → scan resolution |
 | PULL | `ops/pull.rs` | subtree reconstruction via identity range scan |
 | SCAN | `ops/scan.rs` | router decision; primary / ghost / ghost-precomputed branches |

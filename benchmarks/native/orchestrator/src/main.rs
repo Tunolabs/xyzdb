@@ -416,6 +416,13 @@ fn main() -> Result<()> {
         },
         storage: args.storage.into(),
         scale: args.scale,
+        // Stamped by the run, not inferred by the reader. A reduced run produces
+        // a report indistinguishable from a full one except for the sample counts
+        // buried inside it, and that inference has been made wrong once.
+        canonical: args.cold_runs == CANONICAL_COLD_RUNS
+            && args.duration == CANONICAL_CONCURRENT_SECONDS,
+        cold_runs: args.cold_runs,
+        concurrent_seconds: args.duration,
         schema_mode: args.schema_mode.into(),
         schema: schema_metrics.unwrap_or(SchemaMetrics {
             mode: args.schema_mode.into(),

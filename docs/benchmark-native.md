@@ -236,6 +236,70 @@ symmetric across all three engines** — not a failure:
 The auto-generated report note (`native-bench`) restates this per run; this section is the
 authoritative record so the diff is never mistaken for a regression.
 
+## What counts as a canonical run
+
+A number from this harness is comparable to another only if both came from a
+**canonical** run. Canonical means the full protocol, not a subset:
+
+| parameter | canonical value |
+|---|---|
+| cold runs per query | **100** |
+| concurrent phase | **300 s** |
+| readers | 8 |
+| seed | 42 |
+| cell | engine-exclusive, T6 (2 vCPU / 8 GB) |
+| golden | present and matching |
+
+The harness accepts smaller values, and they are useful — a 3-run cold probe is
+the right tool for checking that a change compiles into something that works. But
+**a reduced run is not a baseline**, and the failure mode is quiet: the report
+looks identical, the file name is identical, and only the sample counts inside it
+differ. A p50 over 20 samples compared against a p50 over 100 is not a
+comparison, and neither is a p50 over 7.
+
+So: before using any prior report as a reference, **read its `n_runs` and its
+concurrent duration out of the JSON**. Do not infer canonicity from the filename,
+the timestamp, or the fact that it is the most recent one — none of those carry
+it. This paragraph exists because that inference was made, and it produced a
+whole table of deltas against a run that had used a fifth of the samples.
+
+Since 2026-08-06 the report **declares it**: `canonical: true|false` at the top
+level, stamped by the run from its own parameters, alongside the `cold_runs` and
+`concurrent_seconds` it used so a reader can see why. A flag is not a substitute
+for reading the two numbers, but it removes the inference from the fast path.
+
+## Comparing engine versions — the 1.1.0 → 1.1.1 A/B
+
+**2026-08-06, Mac arm64, T6 (2 vCPU / 8 GB), SSD, scale 0.1, canonical.** Four
+cells alternated `1.1.0 / 1.1.1 / 1.1.0 / 1.1.1`, engine-exclusive, one harness
+binary throughout — only the engine image differs. Alternated rather than 2+2 so
+a thermal drift spreads across both arms.
+
+**Integrity: 4/4** — `verify_golden` and the content gate matched in every cell,
+identical record counts.
+
+**Cold p50, the query that prompted the A/B:**
+
+| | 1.1.0 | 1.1.1 | Δ |
+|---|---|---|---|
+| Q7BatchIngest | 2.938 ± 0.015 ms | 2.935 ± 0.006 ms | −0.003 ms |
+
+A single earlier run had put Q7 31 % above the July canonical mean, which read as
+a write-path regression. It was not: **both arms sit at ~2.94 ms against July's
+2.27**, so the elevation belongs to the machine that day and is present in the
+unmodified binary too. The other eight queries differ by tens of microseconds.
+
+**Open bound — carried, not closed.** Load throughput came out 2.6 % lower on the
+1.1.1 arm (228.3k vs 234.3k rec/s), and the cells run in the order
+`237.6k → 226.8k → 231.1k → 229.7k`: a decline with partial recovery, i.e.
+thermal, and with only two cells per arm the A arm always holds the earlier —
+colder — slot in each pair. **The delta is confounded with cell order and this
+campaign cannot separate them.** Nothing here justifies more Mac time: no outcome
+would change the decision to ship a patch whose write path adds one relaxed
+atomic load. **Resolve it on the AWS box**, where the thermal envelope is stable
+and the ordering can be broken (`B,A,A,B` or more passes) — it costs nothing there
+and it should not be allowed to disappear between milestones.
+
 ## Source artefacts
 
 Native harness under `benchmarks/native/`; raw per-cell artefacts (`aws_ssd_*`

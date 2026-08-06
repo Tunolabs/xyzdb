@@ -17,7 +17,7 @@ Fixed issues are not repeated here — they live in
 [`CHANGELOG.md`](CHANGELOG.md) and in the release notes under
 [`docs/releases/`](docs/releases/). This file is only what is still true.
 
-As of **1.1.0**.
+As of **1.1.1**.
 
 ---
 
@@ -287,6 +287,48 @@ sure about as ignored until you have counted the rows it returns.
 ---
 
 ## Observability
+
+### `/ready` reports not-ready on an idle engine under `--durability durable`
+
+**What.** The readiness heuristic asks whether `last_successful_sync_ts_ms` is
+within 5 s of now. That timestamp advances only when the sync thread completes a
+real **fsync**, so it tracks *writes*, not liveness. An engine serving reads with
+no writes pending goes stale in five seconds and answers
+`{"ready": false, "reason": "sync_thread heartbeat stale"}` — while the sync
+thread is alive and ticking. Measured: `{"ready": true}` immediately after a
+write, not-ready five seconds later, on the same idle process.
+
+**What it costs you.** A readiness probe wired straight to `/ready` deroutes a
+healthy instance between write bursts. On an idle deployment it never reports
+ready at all, and since the probe is what admits traffic, nothing arrives to make
+it ready — the instance cannot bootstrap out of the state on its own.
+
+**Reproduced on 1.1.0 and 1.1.1 identically**; it is not a regression, and it has
+been documented as an operational caveat in
+[`OPERATIONS.md`](OPERATIONS.md) §4 (with the recommended probe pattern) for
+longer than it has been listed here. Listing it now because that file's standard
+applies to this one: a known behaviour that is not written down here is a bug in
+this file.
+
+**Workaround.** Both are in `OPERATIONS.md` §4: pair the probe with
+`xyzdb_sync_thread_heartbeat_total` and treat an advancing heartbeat as ready, or
+raise the failure threshold enough to absorb an idle window. `--durability
+batched` / `async` are unaffected (the timestamp stays 0 and the back-compat
+clause covers it).
+
+**Why it is not fixed here.** The engine already distinguishes the two signals —
+`last_successful_sync_ts_ms` (fsyncs) and `heartbeat_count` (every tick of the
+sync loop, idle included, `turba-engine/src/engine.rs`) — and `readiness_response`
+(`crates/server/src/connection.rs`) reads the first while its own doc comment says
+it means to test the second. So the plumbing exists and the wire is on the wrong
+terminal. **Two candidate fixes, and they are not equivalent:** exposing a
+per-tick `last_heartbeat_ts_ms` and reading that is the smaller change, but it
+would make `/ready` blind to a sync thread that is alive and whose fsyncs are
+*failing* — the condition the probe exists to catch. The heuristic in
+`OPERATIONS.md` §4 — `(pending_epoch > synced_epoch) AND (now - last_sync_ts >
+5 s)` — keeps that detection and only removes the idle false-positive, at the cost
+of exposing the two epochs first. The second is the right one; it is a behaviour
+change to a probe, which is why it belongs in a minor and not in this patch.
 
 ### The fused `SCAN | NEAREST` path emits no scan telemetry
 

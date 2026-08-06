@@ -102,8 +102,10 @@ fn range_stream_matches_oracle_across_memtable_and_sstable() {
 
 // ─── Off-by-one: the inclusive upper bound (the recall-breaking risk) ─────────
 
-/// A 22-byte gravity-bucket key: [lobe_id BE(2)][gravity_hash u48 BE(6)][tail(14)].
-/// Mirrors `xyzdb_core::SpatialKey` layout without depending on the upper crate.
+/// A gravity-bucket key of the same SHAPE as `xyzdb_core::SpatialKey`:
+/// [lobe_id BE(2)][gravity_hash u48 BE(6)][tail]. Deliberately not the same
+/// LENGTH — turba is generic over key size and must not track the upper crate's
+/// constant, which has changed three times.
 fn gkey(lobe: u16, gh: u64, tail: [u8; 14]) -> Vec<u8> {
     let mut k = Vec::with_capacity(22);
     k.extend_from_slice(&lobe.to_be_bytes());

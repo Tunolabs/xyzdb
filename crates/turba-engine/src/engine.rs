@@ -26,7 +26,8 @@ pub const KS_SPATIAL: u8 = 0;
 pub const KS_IDENTITY: u8 = 1;
 pub const KS_DICTIONARY: u8 = 2;
 pub const KS_GHOSTS: u8 = 3;
-/// 5th keyspace: per-record vector column, keyed by the 22-byte spatial key.
+/// 5th keyspace: per-record vector column, keyed by the same spatial key as
+/// the record it belongs to.
 pub const KS_VECTORS: u8 = 4;
 
 const JOURNAL_FILE: &str = "journal.wal";
@@ -176,7 +177,7 @@ pub struct TurbaEngine {
     pub identity: Arc<Tree>,
     pub dictionary: Arc<Tree>,
     pub ghosts: Arc<Tree>,
-    /// 5th keyspace: per-record vector column, keyed by the 22-byte spatial
+    /// 5th keyspace: per-record vector column, keyed by the record's spatial
     /// key. A first-class LSM keyspace identical in treatment to the others.
     pub vectors: Arc<Tree>,
 
@@ -1473,7 +1474,7 @@ impl<'a> WriteBatch<'a> {
     }
 
     /// Stage a put into the `vectors` keyspace (5th keyspace: per-record
-    /// vector column, keyed by the 22-byte spatial key).
+    /// vector column, keyed by the record's spatial key).
     pub fn put_vectors(&mut self, key: &[u8], value: &[u8]) {
         self.items.push(BatchItem {
             keyspace_id: KS_VECTORS,
@@ -1639,7 +1640,7 @@ pub(crate) enum KeyspaceKind {
     Identity,
     Dictionary,
     Ghosts,
-    /// 5th keyspace: per-record vector column, keyed by the 22-byte spatial
+    /// 5th keyspace: per-record vector column, keyed by the record's spatial
     /// key. Tuned identically to Dictionary (small-value point keyspace).
     Vectors,
 }

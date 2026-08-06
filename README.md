@@ -90,7 +90,7 @@ Prefer not to build from source? A prebuilt image ships `xyzdb-mcp` and is liste
 
 ```bash
 docker run -i --rm -v /abs/path/to/your/data:/data \
-  ghcr.io/tunolabs/xyzdb-mcp:1.1.0 --embed /data
+  ghcr.io/tunolabs/xyzdb-mcp:1.0.1 --embed /data
 ```
 
 Run with `-i` (stdio transport); see the [Docker section](docs/mcp-integration.md#docker-image) for `--connect` and MCP-client config.

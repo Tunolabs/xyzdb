@@ -2,7 +2,7 @@
 
 Operator runbook for xyzDB 1.1. This is the document an operator opens when running xyzDB in an internal deployment, without needing to read `docs/architecture.md` end-to-end.
 
-> **Status:** current as of 1.1 (2026-08-01). Covers single-node deployment, configuration, health checks, backup/restore, observability, and the operational caveats that still apply. 1.1 is an in-place upgrade from 1.0 (§8) and adds two things an operator sees: the `xyzdb_invariant_*` / `xyzdb_recovered_from_wal` series (§5), and a one-time `REFRESH GHOST` if you run aggregate ghosts over lobes that take upserts (§8).
+> **Status:** current as of 1.1.1 (2026-08-06). Covers single-node deployment, configuration, health checks, backup/restore, observability, and the operational caveats that still apply. 1.1 is an in-place upgrade from 1.0 (§8) and adds two things an operator sees: the `xyzdb_invariant_*` / `xyzdb_recovered_from_wal` series (§5), and a one-time `REFRESH GHOST` if you run aggregate ghosts over lobes that take upserts (§8). 1.1.1 adds a `version` key to `STATS`, HTTP `/stats` and `/health`. Before wiring a readiness probe, read the false-503 case in §4: under `--durability durable` an idle engine reports not-ready, and the recommended pattern pairs `/ready` with the heartbeat series.
 
 ---
 
@@ -172,6 +172,8 @@ Current heuristic:
 - For `--durability batched` / `async` the timestamp == 0 back-compat clause already covers this; this only affects `--durability durable`.
 
 Fix path (open): refine the heuristic to "(`pending_epoch` > `synced_epoch`) AND (now - `last_sync_ts` > 5 s)" — distinguishes "fsync failing" from "no writes pending". Requires exposing `pending_epoch` / `synced_epoch` in `StatsSnapshot` first (tracked).
+
+> Also filed as a defect in [`KNOWN-ISSUES.md`](KNOWN-ISSUES.md) § *`/ready` reports not-ready on an idle engine* — with the reproduction, the file citations for the two signals the engine already keeps apart, and why the smaller fix (a per-tick heartbeat timestamp) is the wrong one: it would make the probe blind to a sync thread whose fsyncs are failing, which is the condition it exists to catch. Listed there because a known behaviour that is only in the operator manual is still missing from the defect file, and that file's own standard says so.
 
 Refinement candidates (planned):
 - `BULKMODE` active → not ready (currently not exposed via `/stats`; tracked).

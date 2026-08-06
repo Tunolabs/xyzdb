@@ -6,7 +6,10 @@ All notable changes to xyzDB are documented here. Format based on [Keep a Change
 
 ## [Unreleased]
 
-## [1.1.1] — the doors the last fix missed
+## [1.1.1] — 2026-08-06 — the doors the last fix missed
+
+Narrative, the shape of the defect and the upgrade note:
+[`docs/releases/v1.1.1.md`](docs/releases/v1.1.1.md).
 
 Patch: **no behaviour change, no on-disk format change, no wire change.** The one
 new response field is additive JSON. A 1.1.0 data directory opens unchanged and a
@@ -43,9 +46,12 @@ new response field is additive JSON. A 1.1.0 data directory opens unchanged and 
   is refused with `INVALID_QUERY`, and so is re-declaring an anchor. Making
   re-declaration a no-op is the better contract and is a behaviour change, so the
   sentence is corrected here and the change waits for a minor.
-- **`docs/mcp-integration.md` commanded an image tag that was never published.**
-  Four `docker run` lines named `xyzdb-mcp:1.1.0`; GHCR carries `1.0.1` only. They
-  now name the tag that exists.
+- **The docs commanded an image tag that was never published.** Five `docker run`
+  lines in `docs/mcp-integration.md` and one in the README named
+  `xyzdb-mcp:1.1.0`; GHCR carries `1.0.1` only, queried against the registry. All
+  six now name the tag that exists, and they stay there until the 1.1.1 image is
+  actually pushed — a doc pointing at something real beats a doc pointing at the
+  version we wish were published.
 
 ### Added
 

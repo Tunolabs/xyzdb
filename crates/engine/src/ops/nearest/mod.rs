@@ -587,7 +587,7 @@ fn try_prefix_scan_nearest(
 
     // Final order: (score DESC, lid ASC) — byte-for-byte the `execute_nearest`
     // contract. Materialize ONLY the survivors, by re-fetching their k blobs by
-    // spatial key (k point-gets) — the heap held the 22-byte key, not a ~4 KB
+    // spatial key (k point-gets) — the heap held the spatial key, not a ~4 KB
     // blob clone per scanned record (that clone, ~N×4 KB, was the whole reason
     // an earlier cut measured SLOWER than the full path).
     let mut cands = heap.into_vec();
@@ -601,7 +601,7 @@ fn try_prefix_scan_nearest(
     // `cands` is the whole bucket in score order; hydrate best-first, apply the
     // FULL filter, and keep passers until k (hydrate-until-k). Either way,
     // materialize by re-fetching each blob by spatial key (a point-get) — the heap
-    // held the 22-byte key, never a per-record blob clone.
+    // held the spatial key, never a per-record blob clone.
     // STEP 1 of the A/B switch — accumulator only, no behaviour change.
     //
     // Was a prefix `Vec<Record>`: correct ONLY because `cands` is score-ordered, so
@@ -792,7 +792,7 @@ fn try_prefix_scan_nearest(
 }
 
 /// Cheap top-k heap entry for the fused fast path: the similarity score, the
-/// record `lid` (for the deterministic tiebreak), the 22-byte spatial `key` (so
+/// record `lid` (for the deterministic tiebreak), the spatial `key` (so
 /// the survivors are re-fetched and deserialized after the scan — NOT a
 /// per-record blob clone), and the V5 `column` bytes when they came from the
 /// `vectors` keyspace (so a survivor's vector is hydrated from bytes already

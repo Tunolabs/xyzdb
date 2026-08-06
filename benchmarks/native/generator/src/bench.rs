@@ -459,12 +459,41 @@ pub struct ResourceMetrics {
     pub n_samples: usize,
 }
 
+/// The full protocol, against which a run is judged comparable.
+///
+/// 100 cold repeats and a 300-second concurrent phase: the values the canonical
+/// launcher passes and the ones the published series were produced with. They are
+/// named here, next to the flag, so the definition cannot drift from the check.
+pub const CANONICAL_COLD_RUNS: usize = 100;
+pub const CANONICAL_CONCURRENT_SECONDS: u64 = 300;
+
 /// Aggregate run report. One per orchestrator invocation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RunReport {
     pub engine: EngineKind,
     pub storage: StorageProfile,
     pub scale: f64,
+    /// Whether this run used the FULL protocol, and is therefore usable as a
+    /// baseline for comparison against another run.
+    ///
+    /// A reduced run (fewer cold repeats, a shorter concurrent phase) produces a
+    /// report that is identical in every visible respect — same filename shape,
+    /// same fields, same structure — and differs only in the sample counts buried
+    /// inside it. Comparing a p50 over 20 samples against one over 100 is not a
+    /// comparison, and the mistake is invisible at the point where it is made.
+    ///
+    /// So the run declares it rather than leaving a reader to reconstruct it:
+    /// `false` means *do not use this as a baseline*. Criteria in
+    /// [`RunReport::is_canonical`].
+    #[serde(default)]
+    pub canonical: bool,
+    /// Cold repeats per query, recorded so a reader can see WHY `canonical` is
+    /// what it is instead of trusting the flag.
+    #[serde(default)]
+    pub cold_runs: usize,
+    /// Concurrent phase length in seconds; `0` when the phase was skipped.
+    #[serde(default)]
+    pub concurrent_seconds: u64,
     pub schema_mode: SchemaMode,
     pub schema: SchemaMetrics,
     pub load: LoadMetrics,

@@ -240,8 +240,9 @@ impl Engine {
                             &record.fields,
                         )
                     });
-                // gravity_hash is the u48 BE at key bytes 2..8 (same layout for
-                // 22-byte and legacy 10-byte keys).
+                // gravity_hash is the u48 BE at key bytes 2..8 — the same offset in
+                // the current layout and in legacy 10-byte keys, which is why this
+                // reads the offset and not the total length.
                 let b = old_key.as_slice();
                 let old_hash = ((b[2] as u64) << 40)
                     | ((b[3] as u64) << 32)

@@ -234,3 +234,38 @@ aggregation pipeline with `$merge`. xyzDB has no equivalent thread
 - Engine: [`docs/architecture.md`](../../docs/architecture.md).
 - Language: [`docs/xytalk-spec.md`](../../docs/xytalk-spec.md).
 - Consolidated results: [`docs/benchmark-native.md`](../../docs/benchmark-native.md).
+
+## Reading a report — the local scale-0.1 series
+
+Everything in [`docs/benchmark-native.md`](../../docs/benchmark-native.md)
+§"What counts as a canonical run" applies. Three things specific to the local
+`results/` directory, all of which have already cost time once:
+
+**Which files are canonical.** As of 2026-08-06 the canonical local scale-0.1
+series is **`20260729-180706`, `20260729-181920`, `20260730-002932`** (three
+passes, `cold_n=100`, concurrent 300 s), plus `20260806-190809`. Everything else
+in `results/` is a reduced probe. In particular **`20260803-203133` is NOT
+canonical** (`cold_n=20`, concurrent 60 s) despite being, for three days, the most
+recent xyzDB report in the directory — which is exactly why it was picked as a
+baseline by mistake. Check `n_runs` in the JSON, never the timestamp.
+
+**`verify` comes back `exact: false`, and that is expected.** The `creditos`
+count exceeds the static expectation because the concurrent phase inserts through
+Q7 while the phase runs, and the expectation is computed from the dataset alone.
+The overshoot scales with `writes_total` — ~4.6 k at 26 writes, ~28.6 k at 186.
+The gate that actually asserts integrity is **`verify_golden`** (and
+`content_gate`); both must be `overall_match: true`. A non-exact `verify` with a
+matching golden is a healthy run.
+
+**The `.run.log` is empty, and that is not a failure.** `run_t6_ssd_scale0.1.sh`
+exports `RUST_LOG=warn` on purpose — the router logs `plan_scan` at INFO for every
+query, and that I/O contaminates the latency it is measuring. The orchestrator's
+phase lines are INFO, so they are suppressed with it. Progress is visible in
+`docker stats` and in the report written at the end; silence in the log is the
+configured behaviour, not a stall.
+
+**Comparing engine versions.** Vary the engine image and nothing else: build each
+arm's image, then run alternated cells (A,B,A,B — not A,A,B,B, so a thermal or
+machine drift spreads across both arms) with one harness binary and a compose
+`image:` override instead of `--build`. Rebuilding the harness per arm varies two
+things at once.

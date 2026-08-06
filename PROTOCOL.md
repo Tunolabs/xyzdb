@@ -222,7 +222,7 @@ exist", not as "call again".
 prefix of the true answer, so what was not reached is *worse*. Under `"key_order"`
 they are the best of a contiguous key region and the unwalked part may hold
 **better** rows. A client that reports "these are the closest" is correct under the
-first and wrong under the second. 1.1.0 emits only `"score_order"`; read the field
+first and wrong under the second. No shipped release emits `"key_order"`; read the field
 rather than assuming it.
 
 `budget_stop` is absent from every non-truncated response, so ordinary frames are
