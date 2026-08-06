@@ -16,6 +16,7 @@
 //! `seal_active` + `flush_sealed` yields exactly one SSTable — the per-SSTable
 //! span (what the G2 threshold measures) is then the whole dataset.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::sync::Arc;
 use turba_engine::cache::BlockCache;
 use turba_engine::compaction::leveled::LeveledConfig;

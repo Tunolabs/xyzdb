@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use turba_engine::block::{self, BlockType};
 use turba_engine::compression::CompressionType;
 use turba_engine::types::{Entry, ValueType};

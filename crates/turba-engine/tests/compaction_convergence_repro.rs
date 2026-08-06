@@ -15,6 +15,7 @@
 //! (no non-last level left over its target). A churn reproduces as a watchdog
 //! timeout; a wrong terminal structure reproduces as the convergence assert.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::Duration;

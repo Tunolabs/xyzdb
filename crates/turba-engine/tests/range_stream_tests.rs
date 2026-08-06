@@ -12,6 +12,7 @@
 //!      tail of a bucket, so a HALF-OPEN bound (`range_iter`) would silently drop
 //!      a record on it — a recall bug invisible until seq/z-order saturate.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use turba_engine::cache::BlockCache;

@@ -17,6 +17,7 @@
 //! Marked `#[ignore]` because it takes 30–90 s; run via
 //!   cargo test -p turba-engine --release --test flush_compact_meta_race_stress -- --ignored --nocapture
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use turba_engine::config::{EngineConfig, IoSchedulerMode, StorageProfile};
@@ -35,7 +36,6 @@ fn flush_compact_meta_race_stress() {
         cache_size_bytes: 64 * 1024 * 1024,
         storage_profile: StorageProfile::Ssd,
         persist_mode: PersistMode::Buffer,
-        worker_threads: 2,
         io_scheduler: IoSchedulerMode::Ssd,
         l0_batch_override: None,
         block_cache_lane_admission: true,

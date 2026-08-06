@@ -10,6 +10,7 @@
 //! because it drives the `COMPACT` flow through the `xyzdb-engine` xyTalk entry
 //! point (`Engine::run`). Each D1 caller has a dedicated regression test.
 
+// SPDX-License-Identifier: BUSL-1.1
 use proptest::prelude::*;
 use std::collections::BTreeMap;
 use tempfile::TempDir;
@@ -24,7 +25,6 @@ fn make_config() -> EngineConfig {
         persist_mode: PersistMode::SyncData,
         wal_path: None,
         wal_segment_max_bytes: 64 * 1024 * 1024,
-        worker_threads: 1,
         io_scheduler: IoSchedulerMode::Ssd,
         l0_batch_override: None,
         block_cache_lane_admission: true,

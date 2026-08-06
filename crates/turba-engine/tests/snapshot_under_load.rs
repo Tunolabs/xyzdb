@@ -18,6 +18,7 @@
 //! "test pasa repetidamente (10+ runs sin flake); writer-blocking
 //! medido <100 ms en cada run".
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};

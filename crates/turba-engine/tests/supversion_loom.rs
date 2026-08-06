@@ -16,6 +16,7 @@
 
 #![cfg(loom)]
 
+// SPDX-License-Identifier: BUSL-1.1
 use loom::sync::Arc;
 use loom::sync::atomic::{AtomicUsize, Ordering};
 use loom::thread;

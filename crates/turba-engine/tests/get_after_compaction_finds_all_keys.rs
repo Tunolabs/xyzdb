@@ -13,6 +13,7 @@
 //! major compaction, then asserts EVERY inserted key is found by `get` — the
 //! point-lookup path. Pre-fix, middle-range keys come back `None`.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::sync::Arc;
 use turba_engine::cache::BlockCache;
 use turba_engine::compaction::leveled::LeveledConfig;

@@ -18,6 +18,7 @@
 //!       window (documented, bounded to the unflushed writes), while a
 //!       SyncData crash loses nothing.
 
+// SPDX-License-Identifier: BUSL-1.1
 use tempfile::TempDir;
 use turba_engine::config::{EngineConfig, IoSchedulerMode, StorageProfile};
 use turba_engine::engine::TurbaEngine;
@@ -30,7 +31,6 @@ fn config(mode: PersistMode) -> EngineConfig {
         persist_mode: mode,
         wal_path: None,
         wal_segment_max_bytes: 64 * 1024 * 1024,
-        worker_threads: 1,
         io_scheduler: IoSchedulerMode::Ssd,
         l0_batch_override: None,
         block_cache_lane_admission: true,

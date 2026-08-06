@@ -14,6 +14,7 @@
 //! See `docs/wal-state-machine.md` for the state machine these tests
 //! exercise.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -96,7 +97,6 @@ fn config() -> EngineConfig {
         persist_mode: PersistMode::SyncData,
         wal_path: None,
         wal_segment_max_bytes: 64 * 1024 * 1024,
-        worker_threads: 1,
         io_scheduler: IoSchedulerMode::Ssd,
         l0_batch_override: None,
         block_cache_lane_admission: true,

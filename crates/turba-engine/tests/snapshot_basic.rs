@@ -7,6 +7,7 @@
 //! - restore_snapshot recreates a working data dir + Engine::open
 //!   succeeds against it.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::os::unix::fs::MetadataExt;
 use turba_engine::config::EngineConfig;
 use turba_engine::engine::TurbaEngine;

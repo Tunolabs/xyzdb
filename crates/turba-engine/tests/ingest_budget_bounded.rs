@@ -8,6 +8,7 @@
 //! at a tight budget and asserts the summed footprint stays within the derived
 //! ceiling: the writer stalls for background flush instead of ballooning.
 
+// SPDX-License-Identifier: BUSL-1.1
 use tempfile::TempDir;
 use turba_engine::config::{EngineConfig, IoSchedulerMode, StorageProfile};
 use turba_engine::engine::TurbaEngine;
@@ -26,7 +27,6 @@ fn ingest_stays_within_budget_ceiling() {
         // of the persist mode.
         persist_mode: PersistMode::Buffer,
         wal_path: None,
-        worker_threads: 2,
         io_scheduler: IoSchedulerMode::Ssd,
         memory_budget_bytes: budget,
         ..Default::default()

@@ -17,6 +17,7 @@
 //! it drains. Without the fix the snapshot returns immediately while the
 //! compaction is still parked, which the timed assertion catches.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;

@@ -15,6 +15,7 @@
 
 #![cfg(feature = "durability-test-hooks")]
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::sync::atomic::Ordering;
 use tempfile::TempDir;
 use turba_engine::config::{EngineConfig, IoSchedulerMode, StorageProfile};
@@ -28,7 +29,6 @@ fn sync_config() -> EngineConfig {
         persist_mode: PersistMode::SyncData,
         wal_path: None,
         wal_segment_max_bytes: 64 * 1024 * 1024,
-        worker_threads: 1,
         io_scheduler: IoSchedulerMode::Ssd,
         l0_batch_override: None,
         block_cache_lane_admission: true,

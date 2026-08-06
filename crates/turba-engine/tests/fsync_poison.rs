@@ -9,6 +9,7 @@
 //!   cargo test -p turba-engine --features durability-test-hooks --test fsync_poison
 #![cfg(feature = "durability-test-hooks")]
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
@@ -23,7 +24,6 @@ fn sync_config() -> EngineConfig {
         persist_mode: PersistMode::SyncData,
         wal_path: None,
         wal_segment_max_bytes: 64 * 1024 * 1024,
-        worker_threads: 1,
         io_scheduler: IoSchedulerMode::Ssd,
         l0_batch_override: None,
         block_cache_lane_admission: true,

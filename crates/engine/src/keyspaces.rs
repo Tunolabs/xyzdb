@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use std::sync::Arc;
 use turba_engine::config::{
     EngineConfig, IoSchedulerMode as XyzIoSchedulerMode, StorageProfile as XyzStorageProfile,
@@ -70,7 +71,6 @@ pub fn open_engine(
         } else {
             PersistMode::SyncData
         },
-        worker_threads: 2,
         io_scheduler: match io_scheduler {
             IoSchedulerMode::Ssd => XyzIoSchedulerMode::Ssd,
             IoSchedulerMode::Hdd => XyzIoSchedulerMode::Hdd,

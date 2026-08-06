@@ -32,6 +32,7 @@
 //! belongs in the command that produced it, not hidden in the code. Without it a
 //! few MB collapse into a single L1 table — see the multi-table assertion below.
 
+// SPDX-License-Identifier: BUSL-1.1
 use turba_engine::config::{EngineConfig, IoSchedulerMode, StorageProfile};
 use turba_engine::engine::TurbaEngine;
 use turba_engine::journal::writer::PersistMode;
@@ -49,7 +50,6 @@ fn config() -> EngineConfig {
         persist_mode: PersistMode::SyncData,
         wal_path: None,
         wal_segment_max_bytes: 64 * 1024 * 1024,
-        worker_threads: 1,
         io_scheduler: IoSchedulerMode::Ssd,
         l0_batch_override: None,
         block_cache_lane_admission: true,

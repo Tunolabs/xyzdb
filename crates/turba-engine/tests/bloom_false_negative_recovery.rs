@@ -16,6 +16,7 @@
 //! bloom-gated get misses, bloom-less get finds) is the read-path/not-durability
 //! proof and the permanent gate for the `ops/nearest` hydration fallback.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};

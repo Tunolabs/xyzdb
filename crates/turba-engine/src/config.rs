@@ -1,5 +1,6 @@
 //! Engine-level configuration.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::path::PathBuf;
 
 use crate::journal::writer::PersistMode;
@@ -32,7 +33,6 @@ pub struct EngineConfig {
     pub cache_size_bytes: u64,
     pub storage_profile: StorageProfile,
     pub persist_mode: PersistMode,
-    pub worker_threads: usize,
     /// I/O scheduler mode. Default Ssd (Passthrough). Cycle doc §6 D6.
     pub io_scheduler: IoSchedulerMode,
     /// Optional override for `LeveledConfig.l0_compact_batch_size`.
@@ -105,7 +105,6 @@ impl Default for EngineConfig {
             cache_size_bytes: 256 * 1024 * 1024, // 256MB
             storage_profile: StorageProfile::Ssd,
             persist_mode: PersistMode::Buffer,
-            worker_threads: 2,
             io_scheduler: IoSchedulerMode::Ssd,
             l0_batch_override: None,
             block_cache_lane_admission: true,

@@ -6,6 +6,7 @@
 //! tests pin: (1) a concurrent open of the same dir is rejected; (2) the lock
 //! releases on drop and a reopen recovers the data (survives a "restart").
 
+// SPDX-License-Identifier: BUSL-1.1
 use turba_engine::config::EngineConfig;
 use turba_engine::engine::TurbaEngine;
 

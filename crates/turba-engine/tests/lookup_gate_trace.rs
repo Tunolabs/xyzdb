@@ -16,6 +16,7 @@
 //!     present keys", historically this symptom with no bloom involved);
 //!   - a bloom false negative (bloom-gated read absent, bloom-less read present).
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::path::Path;
 use std::sync::Arc;
 use turba_engine::cache::BlockCache;

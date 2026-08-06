@@ -19,6 +19,7 @@
 //! on an argument rather than on a rule, and a reused identity is a hazard for
 //! everything keyed by it (block cache, meta cache, orphan cleanup, FlushIdGuard).
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::path::Path;
 use std::sync::Arc;
 use turba_engine::cache::BlockCache;

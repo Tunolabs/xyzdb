@@ -12,6 +12,7 @@
 //! Its own test binary: the process-wide `TURBA_WAL_MAX_BYTES` set below must not
 //! race another test's engine open.
 
+// SPDX-License-Identifier: BUSL-1.1
 // This test measures the PRODUCTION WAL pruner — the size-triggered flush-only
 // checkpoint that lives under `cfg(not(feature = "durability-test-hooks"))` in
 // `engine.rs`. Under `--features durability-test-hooks` that pruner is replaced
@@ -37,7 +38,6 @@ fn config() -> EngineConfig {
         persist_mode: PersistMode::SyncData,
         wal_path: None,
         wal_segment_max_bytes: 4 * 1024 * 1024, // 4 MiB segments → archived segments roll
-        worker_threads: 1,
         io_scheduler: IoSchedulerMode::Ssd,
         l0_batch_override: None,
         block_cache_lane_admission: true,

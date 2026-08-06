@@ -17,6 +17,7 @@
 //! several times with duplicate keys in scan order, then compacting and reading
 //! back — no 8 MB of data needed.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::sync::Arc;
 use turba_engine::cache::BlockCache;
 use turba_engine::compression::CompressionType;

@@ -44,6 +44,7 @@
 //!   is NOT asserted — the bench reports the measured delta as
 //!   evidence for the H7 finding.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use turba_engine::cache::{BlockCache, BlockHandle, DecodedBlock};

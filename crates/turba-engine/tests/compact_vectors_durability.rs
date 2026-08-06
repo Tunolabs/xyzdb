@@ -16,6 +16,7 @@
 //!    lags — so a future maintenance op that flushes only a subset can never
 //!    silently drop the rest.
 
+// SPDX-License-Identifier: BUSL-1.1
 use tempfile::TempDir;
 use turba_engine::config::{EngineConfig, IoSchedulerMode, StorageProfile};
 use turba_engine::engine::TurbaEngine;
@@ -27,7 +28,6 @@ fn make_config() -> EngineConfig {
         storage_profile: StorageProfile::Ssd,
         persist_mode: PersistMode::SyncData,
         wal_path: None,
-        worker_threads: 1,
         io_scheduler: IoSchedulerMode::Ssd,
         l0_batch_override: None,
         block_cache_lane_admission: true,

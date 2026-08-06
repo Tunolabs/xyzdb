@@ -17,6 +17,7 @@
 //! watermark so the WAL is genuinely un-pruned at shutdown — then asserts the WAL
 //! is empty after `shutdown()` and every record still recovers on reopen.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::path::Path;
 use turba_engine::config::{EngineConfig, IoSchedulerMode, StorageProfile};
 use turba_engine::engine::TurbaEngine;
@@ -33,7 +34,6 @@ fn config() -> EngineConfig {
         // memtable flush threshold, so the memtable never auto-flushes and the
         // prune watermark stays pinned.
         wal_segment_max_bytes: 8 * 1024,
-        worker_threads: 1,
         io_scheduler: IoSchedulerMode::Ssd,
         l0_batch_override: None,
         block_cache_lane_admission: true,
