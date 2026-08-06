@@ -26,6 +26,7 @@
 //! not touch `sysinfo`, `/proc/meminfo`, `sysconf`, or any other
 //! physical-memory source.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::path::Path;
 
 /// Conservative fallback budget used when no explicit override and no

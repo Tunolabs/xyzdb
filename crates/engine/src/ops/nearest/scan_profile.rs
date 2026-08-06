@@ -2,6 +2,7 @@
 //! find what dominates (the prefix path attacks deserialize, which the
 //! measurements suggest is NOT the neck). Run explicitly:
 //!   cargo test -p xyzdb-engine scan_profile -- --ignored --nocapture
+// SPDX-License-Identifier: BUSL-1.1
 use crate::engine::Engine;
 use std::collections::BinaryHeap;
 use std::hint::black_box;

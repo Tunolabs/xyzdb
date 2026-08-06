@@ -17,6 +17,7 @@
 //! `[XYZDB_MAGIC][SPEC_FORMAT][postcard(SatelliteSpec)]` — the same envelope
 //! shape as `GravitySpec`/`VectorSpec`, so a lobe reads its axes from one place.
 
+// SPDX-License-Identifier: BUSL-1.1
 use serde::{Deserialize, Serialize};
 
 /// Current persisted format byte, behind `XYZDB_MAGIC` in the `[0xFF,0xF5]

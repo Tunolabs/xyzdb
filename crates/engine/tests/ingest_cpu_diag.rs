@@ -2,6 +2,7 @@
 //! Isolates text-parse (V1 nom) vs execute (put) vs binary-bulk (V3, no parse). Same type
 //! stored (Value::Vector f32) on both paths. Run: cargo test --release -p xyzdb-engine
 //! --test ingest_cpu_diag -- --nocapture  (release: debug does not reflect the real cost).
+// SPDX-License-Identifier: BUSL-1.1
 use std::collections::BTreeMap;
 use std::time::Instant;
 use xyzdb_core::value::Value;

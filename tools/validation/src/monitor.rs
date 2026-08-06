@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};

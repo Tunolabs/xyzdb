@@ -1,5 +1,6 @@
 //! SSTable reader: opens an SSTable file, reads index/bloom/meta, supports point reads and scans.
 
+// SPDX-License-Identifier: BUSL-1.1
 use crate::block;
 use crate::bloom::{self, BloomFilter};
 use crate::cache::{BlockCache, BlockHandle, DecodedBlock, MetaHandle, MetaKind, MetaSection};

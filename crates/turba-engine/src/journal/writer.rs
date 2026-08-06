@@ -1,5 +1,6 @@
 //! Journal writer: appends encoded batches to the WAL file with optional fsync.
 
+// SPDX-License-Identifier: BUSL-1.1
 use crate::error::Result;
 use crate::journal::entry::{BatchItem, encode_batch};
 use std::fs::{File, OpenOptions};

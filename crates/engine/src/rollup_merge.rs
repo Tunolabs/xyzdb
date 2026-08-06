@@ -7,6 +7,7 @@
 //! last-writer-wins. This is what lets rollups be written without a
 //! read-modify-write: the O(groups) RMW that forced P0-2's revert.
 
+// SPDX-License-Identifier: BUSL-1.1
 use crate::aggregate_state::{RollupDelta, decode_rollup_delta};
 use turba_engine::merge_op::MergeOperator;
 

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use dashmap::DashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};

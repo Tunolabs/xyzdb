@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -1037,8 +1038,11 @@ fn ghost_entry_tiebreak<'a>(
 }
 
 /// Encode ghost entry value: spatial_key + optional projected fields.
-/// When projection is empty, value = spatial_key (its current size — v0.5.x
-/// shipped 18 bytes; v0.6.0-pre is 22 bytes per `SPATIAL_KEY_SIZE`).
+///
+/// When projection is empty, value = the spatial key at whatever length
+/// `SPATIAL_KEY_SIZE` currently is; this encoder reads the slice and never names
+/// the number. It has changed three times — 18 bytes through v0.5.x, 22 in
+/// v0.6.0-pre, 24 since 0.9.4 with the satellite axis — which is exactly why.
 /// When projection is set, value = spatial_key + postcard([Option<Value>; N]).
 fn encode_ghost_value(spatial_key: &[u8], record: &Record, projection: &[String]) -> Vec<u8> {
     if projection.is_empty() {

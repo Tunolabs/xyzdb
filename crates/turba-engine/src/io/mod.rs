@@ -22,6 +22,7 @@
 //! object would force a vtable lookup per call, which exceeds the work
 //! Passthrough does and would invalidate the SSD G5 ≤ 2 % gate.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, Instant};

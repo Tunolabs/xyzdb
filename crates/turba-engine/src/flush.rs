@@ -1,5 +1,6 @@
 //! Flush: convert a sealed memtable into an SSTable on disk.
 
+// SPDX-License-Identifier: BUSL-1.1
 use crate::error::Result;
 use crate::memtable::Memtable;
 use crate::table::meta::SSTableMeta;

@@ -9,6 +9,7 @@
 //! L0 → L1: merge ALL L0 tables with overlapping L1 tables.
 //! L(n) → L(n+1): pick the table with most overlap, merge with overlapping tables at L(n+1).
 
+// SPDX-License-Identifier: BUSL-1.1
 use crate::tree::version::{MAX_LEVELS, TableHandle, Version};
 use std::sync::Arc;
 

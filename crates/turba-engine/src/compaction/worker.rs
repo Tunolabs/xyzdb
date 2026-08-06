@@ -1,5 +1,6 @@
 //! Compaction worker: reads input SSTables, merges, writes output SSTables.
 
+// SPDX-License-Identifier: BUSL-1.1
 use crate::cache::BlockCache;
 use crate::compaction::leveled::CompactionTask;
 use crate::compaction::stream::CompactionStream;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use crate::error::{Error, Result};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

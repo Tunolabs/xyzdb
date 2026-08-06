@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use crate::anchor::dictionary_key;
 use crate::cursor::{
     CURSOR_FORMAT_V2, CursorPayload, decode_cursor, encode_cursor, filter_checksum,

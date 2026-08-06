@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /// Temporary diagnostic: count raw entries in spatial tree by lobe_id prefix.
 use std::collections::HashMap;
 use std::path::Path;

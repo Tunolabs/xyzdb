@@ -18,6 +18,7 @@
 //! MCP spec); `xyzdb://lobes` and `xyzdb://stats` are exposed via
 //! `resources/list`. All three URIs are accepted by `resources/read`.
 
+// SPDX-License-Identifier: BUSL-1.1
 /// Concrete URI: list of lobes.
 pub const URI_LOBES: &str = "xyzdb://lobes";
 

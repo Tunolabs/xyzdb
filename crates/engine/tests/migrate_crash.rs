@@ -13,6 +13,7 @@
 //! the window so a boundary is crossed without a 10k-row dataset) and
 //! `FORCE_MIGRATE_ABORT_AFTER_WINDOWS` (abort after N committed windows).
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::sync::atomic::Ordering;
 use xyzdb_engine::engine::{
     Engine, FORCE_MIGRATE_ABORT_AFTER_WINDOWS, MIGRATE_WINDOW_LIMIT, QueryResult,

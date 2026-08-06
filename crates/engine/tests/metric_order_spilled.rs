@@ -5,6 +5,7 @@
 //! forces the spill with a handful of groups. This file is its own test binary
 //! with a single test, so the process-global spill-limit env is not shared.
 
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_core::value::Value;
 use xyzdb_engine::engine::{Engine, QueryResult};
 

@@ -14,6 +14,7 @@
 //!   message + correlation_id; the full error is logged server-side at
 //!   ERROR level with the same correlation_id for operator triage.
 
+// SPDX-License-Identifier: BUSL-1.1
 // Pillar 1 ships the redaction/mapping infrastructure; only the
 // `stats` tool exists yet and it does not raise XyzError because
 // stats_snapshot returns infallibly. Pillar 2's `query` tool will

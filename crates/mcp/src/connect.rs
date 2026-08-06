@@ -18,6 +18,7 @@
 //! bearer-token preamble is sent first, so `--connect` works against a server
 //! started with `--auth-token`.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::net::IpAddr;
 use std::str::FromStr;
 use std::time::Duration;

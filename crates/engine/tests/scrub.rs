@@ -6,6 +6,7 @@
 //! query hits it. This repro TRIGGERS the fault: flip a byte inside a data
 //! block on disk, then SCRUB must report it — and report clean otherwise.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::path::{Path, PathBuf};
 use xyzdb_engine::engine::{Engine, QueryResult};
 

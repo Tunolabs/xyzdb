@@ -18,6 +18,7 @@
 //! regression (COMPACT skipping vectors again) leaves disk_sst=0 AND WAL=0 and
 //! trips the assert. Both write shapes (individual `PUT` and `PUT BATCH`) covered.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::path::Path;
 use xyzdb_engine::engine::{Engine, QueryResult};
 

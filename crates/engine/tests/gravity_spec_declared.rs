@@ -6,6 +6,7 @@
 //! placement, not query equality. Re-declaring a different spec after one exists
 //! errors (declare before the first write; re-bucketing is re-gravitation).
 
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_engine::engine::{Engine, QueryResult};
 
 fn exec(engine: &Engine, s: &str) -> QueryResult {

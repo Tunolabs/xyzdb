@@ -3,6 +3,7 @@
 //! Supports add/subtract for count, sum, avg. Min/Max are add-only;
 //! subtract marks them dirty for periodic reconciliation.
 
+// SPDX-License-Identifier: BUSL-1.1
 use crate::ops::{CoreFilterExpr, matches_core_expr, to_core_expr};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

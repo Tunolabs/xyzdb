@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_core::record::Record;
 use xyzdb_core::result::QueryResult;
 

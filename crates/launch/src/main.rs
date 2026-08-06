@@ -28,6 +28,7 @@
 //! with no dependencies, compiled at the baseline ISA so it is guaranteed to
 //! start wherever the container starts.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::Path;

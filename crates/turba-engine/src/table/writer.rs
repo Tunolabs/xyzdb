@@ -9,6 +9,7 @@
 //! [Footer (28 bytes)]            ← magic + section offsets
 //! ```
 
+// SPDX-License-Identifier: BUSL-1.1
 use crate::block::{self, BlockType};
 use crate::bloom::{self, BloomBuilder};
 use crate::compression::CompressionType;

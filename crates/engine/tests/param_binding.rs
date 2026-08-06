@@ -4,6 +4,7 @@
 //! never enters the query string as syntax. An unbound `$param` is a hard error,
 //! never silently treated as a literal.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::collections::HashMap;
 use xyzdb_core::value::Value;
 use xyzdb_engine::engine::{Engine, QueryResult};

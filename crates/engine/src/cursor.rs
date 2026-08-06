@@ -29,6 +29,7 @@
 //!   pagination sessions; document any FilterExpr changes in the
 //!   corresponding release entry.
 
+// SPDX-License-Identifier: BUSL-1.1
 use serde::{Deserialize, Serialize};
 use xxhash_rust::xxh3::xxh3_64;
 use xytalk_parser::ast::FilterExpr;

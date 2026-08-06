@@ -9,6 +9,7 @@
 //! independent in-test brute-force ranking over the same union, for every k
 //! (including k larger than the union).
 
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_core::value::Value;
 use xyzdb_engine::engine::{Engine, QueryResult};
 

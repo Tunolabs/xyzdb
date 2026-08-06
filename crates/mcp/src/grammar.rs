@@ -14,6 +14,7 @@
 //! the text AND rejected by the parser, and every current verb must appear.
 //! Change the parser without updating the description and `cargo test` fails.
 
+// SPDX-License-Identifier: BUSL-1.1
 #[cfg(test)]
 mod tests {
     /// The served description of the `query` tool — the exact text an MCP client

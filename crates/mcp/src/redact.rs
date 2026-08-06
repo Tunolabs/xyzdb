@@ -10,6 +10,7 @@
 //! Only when the operator passes `--log-statements` does the full
 //! statement (and cursor token) appear in TRACE-level events.
 
+// SPDX-License-Identifier: BUSL-1.1
 use twox_hash::XxHash3_64;
 
 /// xxh3-64 fingerprint of a statement, returned as the first 8 hex

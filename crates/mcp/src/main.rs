@@ -13,6 +13,7 @@
 //!
 //! See `docs/mcp-integration.md` for tools, resources, and modes.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};

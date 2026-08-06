@@ -18,6 +18,7 @@
 //!
 //! Usage: `cargo run --release --example readpath_probe -- [g4|g1a] [N]`
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_engine::engine::{Engine, QueryResult};
 
 fn temp_engine() -> (Engine, tempfile::TempDir) {

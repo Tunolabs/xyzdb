@@ -8,6 +8,7 @@
 //! Post-fix (sharded check→commit lock keyed by dict_key), exactly one
 //! survives and there are no orphans.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::sync::{Arc, Barrier};
 use xyzdb_engine::engine::{Engine, QueryResult};
 

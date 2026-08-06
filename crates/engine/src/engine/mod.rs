@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use crate::anchor::AnchorRegistry;
 use crate::dict_encoding::DictRegistry;
 use crate::field_registry::LobeFieldRegistry;

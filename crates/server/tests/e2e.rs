@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::net::TcpStream;

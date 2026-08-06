@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use xyzdb_core::error::{Result, XyzError};

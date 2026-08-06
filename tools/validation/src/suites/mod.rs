@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 pub mod s01_data_load;
 pub mod s02_read_patterns;
 pub mod s03_write_stress;

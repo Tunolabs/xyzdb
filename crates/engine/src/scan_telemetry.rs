@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 use xytalk_parser::ast::Filter;

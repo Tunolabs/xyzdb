@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use rand::prelude::IndexedRandom;
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};

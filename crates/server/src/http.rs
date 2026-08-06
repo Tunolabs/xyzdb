@@ -42,6 +42,7 @@
 //! - Maximum request size is bounded by [`MAX_REQUEST_BYTES`] to prevent
 //!   slowloris-style buffer exhaustion.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use xyzdb_engine::engine::Engine;

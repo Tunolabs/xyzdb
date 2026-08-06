@@ -23,6 +23,7 @@
 //! workers exit cleanly on engine drop (sender drops → receivers see
 //! `Disconnected` → loop exits → `JoinHandle::join`).
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::sync::Arc;
 use std::thread::JoinHandle;
 

@@ -41,6 +41,7 @@
 //!   offsets: [u32 LE × count]  (byte offset of each restart entry)
 //! ```
 
+// SPDX-License-Identifier: BUSL-1.1
 use crate::compression::{self, CompressionType};
 use crate::error::{Error, Result};
 use crate::types::{Entry, SeqNo, ValueType};

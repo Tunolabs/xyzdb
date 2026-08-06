@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 // Z-Order 2D encoding/decoding. Ported from POC 2 (validated at 123M records).
 
 /// Spread 21 bits of a value into every other bit position (42 bits total).

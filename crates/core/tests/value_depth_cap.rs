@@ -5,6 +5,7 @@
 //! wire (a bare postcard `Value`) and disk (a record blob whose field holds an
 //! over-deep `Value`).
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::collections::BTreeMap;
 use xyzdb_core::lid::LID;
 use xyzdb_core::record::{Record, deserialize_record, serialize_record};

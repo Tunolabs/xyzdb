@@ -18,6 +18,7 @@
 //! that answers "absent" for every key. The live crash reproducer is flaky; this
 //! is deterministic.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};

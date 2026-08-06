@@ -12,6 +12,7 @@
 //! `--connect` target) is enforced in `main.rs` before this function
 //! runs.
 
+// SPDX-License-Identifier: BUSL-1.1
 use tracing_subscriber::EnvFilter;
 
 const STATEMENT_TARGET: &str = "xyzdb_mcp::statements";

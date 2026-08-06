@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use std::collections::HashMap;
 use xyzdb_core::error::{Result, XyzError};
 use xyzdb_core::field_dict::FieldDict;

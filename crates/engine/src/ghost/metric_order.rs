@@ -19,6 +19,7 @@
 //! result row, its metric, and its tiebreak — shared by emission, the O(N) read,
 //! and `planner::apply_top`. So the O(N) result equals sort-all-then-truncate.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::collections::{BTreeMap, HashSet};
 
 use serde::{Deserialize, Serialize};

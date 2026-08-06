@@ -10,6 +10,7 @@
 //! scenario (empty-filter ghost, filtered ghost, range, extra predicates,
 //! projection, NEAREST, multi-type, post-delete/update) against the oracle.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::collections::BTreeSet;
 use xyzdb_engine::engine::{Engine, QueryResult};
 

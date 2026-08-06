@@ -9,6 +9,7 @@
 //! mirrors the bench's exact lifecycle (CREATE GHOST → BULKMODE load → COMPACT →
 //! REFRESH GHOST → SCAN GHOST).
 
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_engine::engine::{Engine, QueryResult};
 
 fn exec(engine: &Engine, s: &str) -> QueryResult {

@@ -50,6 +50,7 @@
 //! consistent snapshot. The OPERATIONS.md "Backup" section
 //! recommends pausing bulk loads before snapshotting.
 
+// SPDX-License-Identifier: BUSL-1.1
 use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;

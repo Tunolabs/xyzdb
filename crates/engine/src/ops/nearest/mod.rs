@@ -7,6 +7,7 @@
 //! small set — no ANN index, no recall trade-off. Cross-bucket / global search
 //! is a separate mechanism.
 
+// SPDX-License-Identifier: BUSL-1.1
 use crate::engine::Engine;
 use crate::ops::literal_to_value;
 use std::cmp::Ordering;

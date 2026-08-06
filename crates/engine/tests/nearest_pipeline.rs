@@ -4,6 +4,7 @@
 //! checks the load-bearing property: `NEAREST` ranks only the records the
 //! preceding `SCAN` returned — i.e. it stays inside the gravity bucket.
 
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_core::value::Value;
 use xyzdb_engine::engine::{Engine, QueryResult};
 

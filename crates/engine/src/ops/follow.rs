@@ -7,6 +7,7 @@
 //! cited document (a different entity)" becomes one pipeline step. The caller
 //! names the reference field and target — the engine just resolves it cheaply.
 
+// SPDX-License-Identifier: BUSL-1.1
 use crate::engine::Engine;
 use std::collections::HashSet;
 use xytalk_parser::ast::{Filter, FilterOp, FindTarget, FollowStmt, Literal};

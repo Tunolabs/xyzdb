@@ -7,6 +7,7 @@
 //! guard. V3/V4 record blobs are retired (only V1/V2/V5 are serialized), so the
 //! coverage is V1/V2/V5 records + the bare `Value` under postcard and bincode.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::collections::BTreeMap;
 use xyzdb_core::field_dict::FieldDict;
 use xyzdb_core::lid::LID;

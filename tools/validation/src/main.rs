@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 mod config;
 mod data_generator;
 mod monitor;

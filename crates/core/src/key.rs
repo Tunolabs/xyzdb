@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use crate::zorder::z_order_2d_encode;
 
 /// Size of a serialized SpatialKey in bytes (0.9.4 layout: the 22-byte
@@ -164,14 +165,14 @@ impl SpatialKey {
         }
     }
 
-    /// Extract `gravity_hash` from raw 22-byte key without full decode.
+    /// Extract `gravity_hash` from a raw key without full decode.
     pub fn gravity_hash_from_bytes(bytes: &[u8; SPATIAL_KEY_SIZE]) -> u64 {
         u48_from_be_bytes(&bytes[2..8])
     }
 
     /// Compute (start_key, end_key) for a range scan over all records
-    /// in a given gravity bucket. Both bounds are full 22-byte keys so
-    /// the underlying `range(min, max)` walks every record sharing the
+    /// in a given gravity bucket. Both bounds are full `SPATIAL_KEY_SIZE`
+    /// keys so the underlying `range(min, max)` walks every record sharing the
     /// `(lobe_id, gravity_hash)` prefix regardless of `z_order_2d` or
     /// `seq`. `key_min` zeroes the tail; `key_max` saturates it.
     pub fn prefix_for_gravity(

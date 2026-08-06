@@ -21,6 +21,7 @@
 //! by OrbStack's VM and would mislead. macOS callers always observe
 //! `Default::default()`; the bench (Linux container) yields real numbers.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::io;
 use std::path::Path;
 

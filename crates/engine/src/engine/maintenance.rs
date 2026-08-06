@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use super::*;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 

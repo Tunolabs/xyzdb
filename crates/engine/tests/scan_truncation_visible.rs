@@ -13,6 +13,7 @@
 //! deterministically triggerable end to end). The full-lobe path already emits a
 //! resumable cursor and is exercised by the pagination tests.
 
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_engine::engine::{Engine, QueryResult};
 
 /// Seed `n` records into a single gravity bucket (`*conv:"c1"`) so a

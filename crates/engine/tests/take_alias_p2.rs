@@ -11,6 +11,7 @@
 //!   3. `TAKE n` without BY truncates grouped rows (pipeline LIMIT), no reorder;
 //!   4. `SCAN | TAKE n` without BY truncates a plain record stream.
 
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_core::value::Value;
 use xyzdb_engine::engine::{Engine, QueryResult};
 

@@ -15,6 +15,7 @@
 //! data directory upgraded across the 0.8 format break — where some SSTables
 //! predate v2 until they are recompacted — keeps opening.
 
+// SPDX-License-Identifier: BUSL-1.1
 use crate::error::{Error, Result};
 use byteorder_lite::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::Write;

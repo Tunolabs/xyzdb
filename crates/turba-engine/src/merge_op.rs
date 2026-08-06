@@ -17,6 +17,7 @@
 //! subset of a key's versions, in any grouping, and a read folds the rest — the
 //! result must be independent of how the versions were partitioned or ordered.
 
+// SPDX-License-Identifier: BUSL-1.1
 /// Combines multiple values for one key into a single value.
 pub trait MergeOperator: Send + Sync {
     /// True if this operator combines `key`'s values (vs last-writer-wins).

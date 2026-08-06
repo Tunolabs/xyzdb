@@ -4,6 +4,7 @@
 //! When the approximate size exceeds a threshold, the memtable is sealed
 //! and flushed to an SSTable on disk.
 
+// SPDX-License-Identifier: BUSL-1.1
 use crate::types::{Entry, InternalKey, SeqNo, ValueType};
 use crossbeam_skiplist::SkipMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};

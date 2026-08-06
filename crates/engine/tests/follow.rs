@@ -8,6 +8,7 @@
 //! entity in a different bucket — in one pipeline. This is the bridge that
 //! makes associative context span entities, not just one conversation.
 
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_core::value::Value;
 use xyzdb_engine::engine::{Engine, QueryResult};
 

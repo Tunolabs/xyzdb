@@ -6,6 +6,7 @@
 //! Each flush or compaction creates a new Version. SuperVersion is swapped atomically
 //! under write lock so concurrent readers see a consistent state.
 
+// SPDX-License-Identifier: BUSL-1.1
 use crate::cache::BlockCache;
 use crate::memtable::Memtable;
 use crate::table::meta::SSTableMeta;

@@ -4,6 +4,7 @@
 //! (user_key ASC, seqno DESC). The merge iterator produces the globally
 //! sorted stream by always popping the minimum.
 
+// SPDX-License-Identifier: BUSL-1.1
 use crate::types::Entry;
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;

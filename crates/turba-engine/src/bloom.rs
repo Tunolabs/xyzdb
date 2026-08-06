@@ -10,6 +10,7 @@
 //! [num_bits: u32 LE]    total bits in filter
 //! ```
 
+// SPDX-License-Identifier: BUSL-1.1
 use byteorder_lite::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::Cursor;
 

@@ -7,6 +7,7 @@
 //!      anchor/gravity fast path, taken unchanged when the tree flattens).
 //! Plus a SET-by-OR reinforcement (SET is a write-path verb too).
 
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_core::value::Value;
 use xyzdb_engine::engine::{Engine, QueryResult};
 

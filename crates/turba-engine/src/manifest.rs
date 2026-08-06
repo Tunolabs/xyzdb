@@ -26,6 +26,7 @@
 //! [checksum: u128 LE (XXH3-128 of everything above)]
 //! ```
 
+// SPDX-License-Identifier: BUSL-1.1
 use crate::error::{Error, Result};
 use crate::tree::version::Version;
 use byteorder_lite::{LittleEndian, ReadBytesExt, WriteBytesExt};

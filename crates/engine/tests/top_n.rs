@@ -7,6 +7,7 @@
 //!   - ghost == runtime: the TOP result is identical whether the group
 //!     aggregate came from a ghost (PreComputed) or a runtime scan.
 
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_core::value::Value;
 use xyzdb_engine::engine::{Engine, QueryResult};
 

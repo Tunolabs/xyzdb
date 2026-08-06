@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use crate::engine::{Engine, QueryResult};
 use xytalk_parser::ast::PullStmt;
 use xyzdb_core::error::{Result, XyzError};

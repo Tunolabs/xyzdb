@@ -7,6 +7,7 @@
 //! remove old SpatialKey + write new + repoint identity) and the record is
 //! found by its new value, gone from the old bucket, with no duplicate.
 
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_core::value::Value;
 use xyzdb_engine::engine::{Engine, QueryResult};
 

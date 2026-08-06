@@ -17,6 +17,7 @@
 //! `[XYZDB_MAGIC][SPEC_FORMAT][postcard(VectorSpec)]` — the same envelope shape
 //! as `GravitySpec`, so `PUT` reads the lobe's hoist field from one place.
 
+// SPDX-License-Identifier: BUSL-1.1
 use serde::{Deserialize, Serialize};
 
 /// Current persisted format byte, behind `XYZDB_MAGIC` in the

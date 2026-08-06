@@ -16,6 +16,7 @@
 //! durable iff the record is). These repros TRIGGER the fault (write ->
 //! restart -> read); they do not merely assert a property.
 
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_core::record::Record;
 use xyzdb_engine::engine::{Engine, QueryResult};
 

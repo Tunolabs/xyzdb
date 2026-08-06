@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use crate::engine::{Engine, QueryResult};
 use std::collections::BTreeMap;
 use xytalk_parser::ast::{PipelineStep, TopBy, TopStmt};

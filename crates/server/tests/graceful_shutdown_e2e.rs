@@ -8,6 +8,7 @@
 //! and the clean-shutdown marker means the restart is clean.
 #![cfg(unix)]
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 use tokio::net::TcpStream;

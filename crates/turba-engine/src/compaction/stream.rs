@@ -4,6 +4,7 @@
 //! - Drops tombstones at the last level (no older data to shadow).
 //! - Preserves tombstones at non-last levels (needed to shadow data in lower levels).
 
+// SPDX-License-Identifier: BUSL-1.1
 use crate::merge_op::MergeOperator;
 use crate::types::{Entry, SeqNo, ValueType};
 use std::collections::VecDeque;

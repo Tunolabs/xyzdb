@@ -4,6 +4,7 @@
 //! query, so a pipeline-declared metric-order ghost must build and serve
 //! `TAKE n BY <metric>` byte-identically to the clause-declared one.
 
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_core::value::Value;
 use xyzdb_engine::engine::{Engine, QueryResult};
 

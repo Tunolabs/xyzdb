@@ -6,6 +6,7 @@
 //! from WHERE <field> = X). The placement contract itself
 //! (`raw_missing_field_returns_none` in gravity_spec.rs) is not touched.
 
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_engine::engine::{Engine, QueryResult};
 
 fn count(engine: &Engine, query: &str) -> usize {

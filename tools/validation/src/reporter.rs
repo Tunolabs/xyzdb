@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::Path;

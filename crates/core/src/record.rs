@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use crate::error::XyzError;
 use crate::field_dict::FieldDict;
 use crate::lid::LID;

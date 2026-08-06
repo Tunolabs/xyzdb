@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use crate::lid::LID;
 use crate::record::Record;
 use crate::value::Value;

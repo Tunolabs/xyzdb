@@ -14,6 +14,7 @@
 //! collapsed to zero rows, because the unfused NEAREST scored records whose
 //! embedding had silently gone missing.
 
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_core::value::Value;
 use xyzdb_engine::engine::{Engine, QueryResult};
 

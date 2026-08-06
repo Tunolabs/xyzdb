@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 // unwrap()/expect() are enforced on production code only. Test code — inline
 // #[cfg(test)] modules and the integration tests under tests/ — may unwrap
 // freely, since a panic there is the failure signal, not a defect. Gating on

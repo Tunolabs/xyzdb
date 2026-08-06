@@ -14,6 +14,7 @@
 //!   env: N (bucket size, default 8000), DIM (default 256), TEXT (bytes, default 3000),
 //!        K (top-k, default 10), ITERS (queries timed, default 100).
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::collections::BTreeMap;
 use std::time::Instant;
 

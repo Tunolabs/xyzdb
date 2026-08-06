@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /// Unified error type for xyzDB.
 #[derive(Debug, thiserror::Error)]
 pub enum XyzError {

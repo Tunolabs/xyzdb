@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use crate::anchor::dictionary_key;
 use crate::engine::{Engine, QueryResult};
 use xytalk_parser::ast::{DeleteStmt, FindTarget, PurgeStmt};

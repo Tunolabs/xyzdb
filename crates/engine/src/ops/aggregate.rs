@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use crate::ops::{CoreFilterExpr, matches_core_expr, to_core_expr};
 use std::collections::BTreeMap;
 use xytalk_parser::ast::{Aggregate, AggregateFunc};

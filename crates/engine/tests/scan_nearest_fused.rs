@@ -10,6 +10,7 @@
 //! * Gate B2 — when no vector is declared (records stay V1), the fused entry
 //!   still routes through the full path and matches it unchanged.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::sync::atomic::Ordering::Relaxed;
 use xytalk_parser::ast::{PipelineStep, Statement};
 use xyzdb_core::error::XyzError;

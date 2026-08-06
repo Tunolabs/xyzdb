@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use std::collections::HashMap;
 
 /// Bidirectional field name ↔ u16 ID mapping for a single lobe.

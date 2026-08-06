@@ -5,6 +5,7 @@
 //! its stored squared norm. A lobe with no vector declaration keeps the V1
 //! format unchanged.
 
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_core::record::{format_version, read_vector_prefix_raw_norm};
 use xyzdb_core::value::Value;
 use xyzdb_engine::engine::{Engine, QueryResult};

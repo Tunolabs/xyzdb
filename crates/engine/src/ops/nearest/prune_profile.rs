@@ -4,6 +4,7 @@
 //! visit-order diagnosis). Exactness is gated — the pruned top-k must be
 //! bit-identical (score, lid) to the unpruned top-k.
 //!   SST=1 cargo test -p xyzdb-engine prune_profile -- --ignored --nocapture
+// SPDX-License-Identifier: BUSL-1.1
 use crate::engine::Engine;
 use std::collections::BinaryHeap;
 use std::hint::black_box;

@@ -12,6 +12,7 @@
 //! "already has a satellite axis" — which can only happen if the spec was
 //! loaded from disk at boot (a fresh, unloaded lobe would accept it).
 
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_core::record::Record;
 use xyzdb_engine::engine::{Engine, QueryResult};
 

@@ -3,6 +3,7 @@
 //! Coordinates memtable, version management, flush, and reads.
 //! No WAL — durability comes in Phase 6 (Engine layer).
 
+// SPDX-License-Identifier: BUSL-1.1
 pub mod version;
 
 use crate::cache::BlockCache;

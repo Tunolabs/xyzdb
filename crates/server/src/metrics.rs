@@ -14,6 +14,7 @@
 //! Lines have the shape `metric_name{labels} value` with `# HELP` and
 //! `# TYPE` headers per metric. All metric names are prefixed `xyzdb_`.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::fmt::Write;
 use xyzdb_engine::stats::StatsSnapshot;
 

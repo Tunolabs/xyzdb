@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use crate::engine::{Engine, QueryResult};
 use std::collections::{HashMap, HashSet};
 use xyzdb_core::error::{Result, XyzError};

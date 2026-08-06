@@ -12,6 +12,7 @@
 //! RESIDUAL`) are process-wide, so every test here serialises on `GATE_LOCK` and
 //! resets both knobs on entry and on drop (panic-safe).
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::sync::Mutex;
 use std::sync::atomic::Ordering::Relaxed;
 use xyzdb_core::key::hash_to_16bits;

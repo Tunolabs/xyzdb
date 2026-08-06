@@ -23,6 +23,7 @@
 //!
 //! Run:  cargo test --release -p xyzdb-engine anon_probe -- --ignored --nocapture
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicI64, Ordering};
 

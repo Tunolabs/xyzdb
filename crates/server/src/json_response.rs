@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use serde_json::{Value as JsonValue, json};
 use std::time::Duration;
 use xyzdb_core::lid::LID;

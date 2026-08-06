@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 // AST types for xyTalk. Produced by the parser, consumed by the engine.
 
 /// Top-level result of parsing one xyTalk statement.

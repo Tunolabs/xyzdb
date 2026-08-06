@@ -5,6 +5,7 @@
 //! correcto aceptado, (d) cliente sin auth contra server sin auth sigue
 //! funcionando (back-compat).
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use xyzdb_engine::engine::Engine;

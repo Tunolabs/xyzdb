@@ -9,6 +9,7 @@
 //! standard CI runners; gated behind a `which` probe so the test skips
 //! cleanly when openssl isn't present rather than failing opaquely.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::process::Command;
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;

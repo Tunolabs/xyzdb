@@ -19,6 +19,7 @@
 //! values are conservative (small physical RAM, no cgroup limit, zero
 //! filesystem free).
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::ffi::CString;
 use std::path::Path;
 

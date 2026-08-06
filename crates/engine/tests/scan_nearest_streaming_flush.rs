@@ -12,6 +12,7 @@
 //! SSTables (COMPACT does NOT flush `vectors`, only spatial/identity/dictionary).
 //! Own process → no concurrent env access (same rationale as q5_scale_repro).
 
+// SPDX-License-Identifier: BUSL-1.1
 use xytalk_parser::ast::{PipelineStep, Statement};
 use xyzdb_core::lid::LID;
 use xyzdb_core::value::Value;

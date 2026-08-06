@@ -8,6 +8,7 @@
 //! `--connect`). Classification is by parsed AST, not substring matching, so a
 //! field or value literally named "delete" never trips the guard.
 
+// SPDX-License-Identifier: BUSL-1.1
 use clap::ValueEnum;
 use xytalk_parser::ast::{PipelineStep, Statement};
 

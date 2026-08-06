@@ -17,6 +17,7 @@
 //! existing fields are stable (paginated cursor shipped in v0.2.5.1)
 //! so drift is bounded.
 
+// SPDX-License-Identifier: BUSL-1.1
 use serde_json::{Value as JsonValue, json};
 use xyzdb_core::lid::LID;
 use xyzdb_core::record::Record;

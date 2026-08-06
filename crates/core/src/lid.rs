@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::sync::atomic::{AtomicU16, AtomicU32, Ordering};

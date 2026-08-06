@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /// Wire protocol for xyzDB. See `PROTOCOL.md` for the full specification;
 /// this module is the implementation.
 ///

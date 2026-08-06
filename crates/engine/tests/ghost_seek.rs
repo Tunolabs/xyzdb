@@ -8,6 +8,7 @@
 //! DESC ghosts, misses, compound filters, Int sort fields. The narrowing is an
 //! I/O bound only; the post-scan filter still enforces the predicate.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::collections::BTreeSet;
 use xyzdb_engine::engine::{Engine, QueryResult};
 

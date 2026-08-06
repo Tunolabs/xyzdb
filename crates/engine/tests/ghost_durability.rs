@@ -13,6 +13,7 @@
 //!
 //! This repro TRIGGERS the fault (write -> crash -> reopen -> read).
 
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_engine::engine::{Engine, QueryResult};
 
 fn run(engine: &Engine, s: &str) -> QueryResult {

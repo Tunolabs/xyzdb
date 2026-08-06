@@ -14,6 +14,7 @@
 //! - HTTP detection does NOT collide with the binary wire protocol:
 //!   sending a V1 query still works on the same port.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use serde::de::{Deserializer, Error as DeError};
 use serde::{Deserialize, Serialize};
 use std::cell::Cell;

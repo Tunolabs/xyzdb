@@ -25,6 +25,7 @@
 //! this needs the trap, not a blank page. Until it runs, `ghost/read.rs` is "not
 //! measured" in KNOWN-ISSUES.md — which is not the same as safe.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};

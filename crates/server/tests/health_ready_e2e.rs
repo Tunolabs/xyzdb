@@ -4,6 +4,7 @@
 //! is configured with `--auth-token`. Load balancer health probes
 //! should not need to know the bearer token.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use xyzdb_engine::engine::Engine;

@@ -22,6 +22,7 @@
 //! No T currently includes an `error` field; if a future T does, this
 //! module switches to a custom Serialize impl (~5 LOC).
 
+// SPDX-License-Identifier: BUSL-1.1
 use rmcp::schemars::{self, JsonSchema};
 use serde::Serialize;
 

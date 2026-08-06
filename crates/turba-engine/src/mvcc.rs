@@ -5,6 +5,7 @@
 //! Output: for each unique user_key, only the first entry with seqno <= visible_seqno.
 //!         Tombstones are included (caller decides whether to skip them).
 
+// SPDX-License-Identifier: BUSL-1.1
 use crate::merge_op::MergeOperator;
 use crate::types::{Entry, SeqNo, ValueType};
 use std::iter::Peekable;

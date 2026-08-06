@@ -3,6 +3,7 @@
 //! not just that records vanish: a PURGE must leave ghosts and anchor indexes
 //! exact (empty), exactly as a WHERE-matching DELETE of every record would.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::collections::BTreeMap;
 use xyzdb_core::value::Value;
 use xyzdb_engine::engine::{Engine, QueryResult};

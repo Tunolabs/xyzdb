@@ -11,6 +11,7 @@
 //! full bucket (parity with SCAN), and PULL keeps linked children while
 //! rejecting bucket cohabitants that carry a different gravity value.
 
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_engine::engine::{Engine, QueryResult};
 
 fn exec(engine: &Engine, s: &str) -> QueryResult {

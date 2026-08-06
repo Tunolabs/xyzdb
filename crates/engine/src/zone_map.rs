@@ -5,6 +5,7 @@
 //! checks if a block might contain records matching the query filters —
 //! if not, the block is skipped entirely (no decompression, no I/O).
 
+// SPDX-License-Identifier: BUSL-1.1
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use turba_engine::table::writer::ZoneMapBuilder;

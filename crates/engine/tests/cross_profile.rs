@@ -12,6 +12,7 @@
 //! checks field values + SCRUB. A profile-dependent parse (e.g. assuming the
 //! open-time block size) would corrupt fields or trip a block checksum.
 
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_core::record::Record;
 use xyzdb_engine::engine::{Engine, QueryResult};
 use xyzdb_engine::keyspaces::StorageProfile;

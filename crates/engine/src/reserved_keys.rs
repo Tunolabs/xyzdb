@@ -16,6 +16,7 @@
 //! disambiguator. That test closes the class: it would have caught both past
 //! collisions.
 
+// SPDX-License-Identifier: BUSL-1.1
 /// Pinned-fields keyspace, keyed by `lobe_id` (`[PIN][lobe_id:2]`). Value is
 /// `[MAGIC][0x01][postcard(Vec<String>)]` — the same shape as [`FIELD_REGISTRY`],
 /// so the two MUST never share a prefix. Moved here from `[0xFF,0xFB]` in 0.7.6

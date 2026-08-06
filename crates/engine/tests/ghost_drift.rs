@@ -15,6 +15,7 @@
 //! FILTERED ghosts whose membership changes when a write crosses the predicate,
 //! plus grouped-aggregate exactness under the same writes.
 
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_engine::engine::{Engine, QueryResult};
 
 fn exec(engine: &Engine, s: &str) -> QueryResult {

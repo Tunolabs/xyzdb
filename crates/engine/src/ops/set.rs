@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use crate::engine::{Engine, QueryResult};
 use crate::ops::literal_to_value;
 use xytalk_parser::ast::SetStmt;

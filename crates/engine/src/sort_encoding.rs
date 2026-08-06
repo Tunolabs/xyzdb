@@ -11,6 +11,7 @@
 //! prefix-free precisely so this suffix can never bleed into the comparison
 //! between two distinct sort values.
 
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_core::value::Value;
 
 /// Encode a sort key: `[ghost_id:2][type_tag:1][value_bytes][tiebreak]`.

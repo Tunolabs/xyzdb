@@ -9,6 +9,7 @@
 //!
 //! If recovery finds Start without matching End (or checksum mismatch), the batch is discarded.
 
+// SPDX-License-Identifier: BUSL-1.1
 use crate::types::ValueType;
 use byteorder_lite::{LittleEndian, WriteBytesExt};
 

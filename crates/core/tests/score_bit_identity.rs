@@ -12,6 +12,7 @@
 //! (G1a, G2, G3, G4) and for the v2==v3 build-widening check: run it before and after,
 //! it must stay green.
 
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_core::distance::{Metric, cosine_pruned, norm, norm_sq, similarity, suffix_norm2};
 
 const PRUNE_BLOCK: usize = 32; // matches ops/nearest.rs

@@ -24,6 +24,7 @@
 //! within-ULP of a naïve f64 fold (different accumulation order), not
 //! bit-identical to it — that is by design.
 
+// SPDX-License-Identifier: BUSL-1.1
 use crate::value::Value;
 use wide::f32x8;
 

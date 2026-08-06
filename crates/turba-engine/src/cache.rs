@@ -11,6 +11,7 @@
 //! counter. Surfaced via `KeyspaceStats.block_cache` in `STATS`. Used to
 //! attribute query latency to (cache miss / disk service).
 
+// SPDX-License-Identifier: BUSL-1.1
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;

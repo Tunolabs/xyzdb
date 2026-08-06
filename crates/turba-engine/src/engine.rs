@@ -4,6 +4,7 @@
 //! shared block cache, WAL for durability, and background flush/compact
 //! workers.
 
+// SPDX-License-Identifier: BUSL-1.1
 use crate::cache::BlockCache;
 use crate::compaction::leveled::LeveledConfig;
 use crate::compression::CompressionType;

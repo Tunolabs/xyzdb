@@ -1,6 +1,7 @@
 //! Journal recovery: read WAL segments in seqno order, parse valid batches,
 //! replay into memtables.
 
+// SPDX-License-Identifier: BUSL-1.1
 use crate::error::Result;
 use crate::journal::entry::{RecoveredBatch, decode_batches};
 use std::fs;

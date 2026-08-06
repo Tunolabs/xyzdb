@@ -19,6 +19,7 @@
 //! (`bounds_for_where`) and the call-site rewrites in `ops/put.rs` and
 //! `ops/scan.rs` are the **wiring increment** that follows this module.
 
+// SPDX-License-Identifier: BUSL-1.1
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use xyzdb_core::value::Value;

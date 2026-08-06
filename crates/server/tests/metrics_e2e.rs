@@ -5,6 +5,7 @@
 //! official parser rather than hand-rolling format checks). Failures
 //! mean the emitter produced something a real scraper would reject.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use xyzdb_engine::engine::Engine;

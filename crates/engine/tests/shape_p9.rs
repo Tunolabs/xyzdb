@@ -4,6 +4,7 @@
 //! (WHERE, ORDER BY, LIMIT — which records, how many, in what order) untouched,
 //! and still return records that lack a named field (just without it).
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::collections::BTreeSet;
 use xyzdb_core::value::Value;
 use xyzdb_engine::engine::{Engine, QueryResult};

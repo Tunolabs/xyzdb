@@ -5,6 +5,7 @@
 //! `SCAN … WHERE` on that lobe returns (packaging, not composition), and it is a
 //! single call — one result, all sections — versus N separate scans.
 
+// SPDX-License-Identifier: BUSL-1.1
 use std::collections::BTreeMap;
 use xyzdb_core::value::Value;
 use xyzdb_engine::engine::{Engine, QueryResult};

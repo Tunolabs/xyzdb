@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use std::collections::{BTreeSet, HashMap};
 use std::sync::atomic::{AtomicU64, Ordering};
 use xytalk_parser::ast::FilterExpr;

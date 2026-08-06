@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 use parking_lot::RwLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};

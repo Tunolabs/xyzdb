@@ -8,6 +8,7 @@
 //! flexible: each field may be any dimension; only mixing dimensions *within one
 //! field* is closed. The learned dimension is durable across restart.
 
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_engine::engine::Engine;
 
 /// A `dim`-length all-float list literal → packs as a `Value::Vector` (the

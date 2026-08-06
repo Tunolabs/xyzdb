@@ -5,6 +5,7 @@
 //! a TOP by a *different* metric than the declared order falls back to O(M)
 //! (still correct), and SHOW GHOSTS surfaces the order + its emitted age.
 
+// SPDX-License-Identifier: BUSL-1.1
 use xyzdb_core::value::Value;
 use xyzdb_engine::engine::{Engine, QueryResult};
 
